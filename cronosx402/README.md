@@ -149,18 +149,3 @@ Run individual services:
 npm run start:a2ui   # A2UI server only
 npm run start:mcp    # Crypto.com MCP only
 npm run start:music  # Music Player MCP only
-```
-
-## Troubleshooting
-
-**No sources found**: Ensure all MCP servers are running and check ports.
-
-**Payment failures**: Verify USDC.e balance and private key configuration.
-
-**Budget filtering**: Increase budget if sources are filtered out due to cost.
-
-See `TROUBLESHOOTING.md` for more details.
-
-## License
-
-MIT
