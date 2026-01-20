@@ -1,57 +1,51 @@
 import 'dotenv/config';
-import { FunctionTool, LlmAgent } from '@google/adk';
-import { z } from 'zod';
+import { LlmAgent } from '@google/adk';
+import { allTools } from './tools/index.js';
 
-const getWeather = new FunctionTool({
-    name: 'get_weather',
-    description: 'Retrieves the current weather report for a specified city.',
-    parameters: z.object({
-        city: z.string().describe('The name of the city for which to retrieve the weather report.'),
-    }),
-    execute: ({ city }) => {
-        if (city.toLowerCase() === 'new york') {
-            return {
-                status: 'success',
-                report:
-                    'The weather in New York is sunny with a temperature of 25 degrees Celsius (77 degrees Fahrenheit).',
-            };
-        } else {
-            return {
-                status: 'error',
-                error_message: `Weather information for '${city}' is not available.`,
-            };
-        }
-    },
-});
-
-const getCurrentTime = new FunctionTool({
-    name: 'get_current_time',
-    description: 'Returns the current time in a specified city.',
-    parameters: z.object({
-        city: z.string().describe("The name of the city for which to retrieve the current time."),
-    }),
-    execute: ({ city }) => {
-        let tz_identifier: string;
-        if (city.toLowerCase() === 'new york') {
-            tz_identifier = 'America/New_York';
-        } else {
-            return {
-                status: 'error',
-                error_message: `Sorry, I don't have timezone information for ${city}.`,
-            };
-        }
-
-        const now = new Date();
-        const report = `The current time in ${city} is ${now.toLocaleString('en-US', { timeZone: tz_identifier })}`;
-
-        return { status: 'success', report: report };
-    },
-});
-
+/**
+ * Source Agent
+ * 
+ * A multi-tool agent that can fetch information from various sources:
+ * - Web Search: General web search queries
+ * - News: Latest news by topic
+ * - Events: Upcoming events, festivals, conferences
+ * - Weather: Weather forecasts for cities
+ * - Wikipedia: Factual information lookup
+ * - YouTube: Video search
+ * - Crypto Price: Cryptocurrency prices (BTC, ETH, CRO, etc.)
+ * - Blockchain: Cronos blockchain data (balances, transactions)
+ * - GitHub: Repository and user information
+ * - Calculator: Mathematical calculations
+ * - Reminders: Create and manage event reminders
+ * 
+ * This agent is designed to work with the x402 payment system,
+ * where each query could potentially be a paid request.
+ */
 export const rootAgent = new LlmAgent({
-    name: 'weather_time_agent',
+    name: 'source_agent',
     model: 'gemini-2.5-flash',
-    description: 'Agent to answer questions about the time and weather in a city.',
-    instruction: 'You are a helpful agent who can answer user questions about the time and weather in a city.',
-    tools: [getWeather, getCurrentTime],
+    description: 'A multi-source information agent that can search the web, find events, get news, check weather, look up crypto prices, and more. Perfect for research, event planning, and staying informed.',
+    instruction: `You are a helpful Source Agent that retrieves information from various sources.
+
+Your capabilities include:
+- **Search**: Find information on any topic using web search
+- **Events**: Find upcoming events like literature festivals, tech conferences, and more
+- **News**: Get the latest news on any topic
+- **Weather**: Check weather conditions for travel planning
+- **Wikipedia**: Get factual information about people, places, and concepts
+- **YouTube**: Find relevant videos and tutorials
+- **Crypto**: Get cryptocurrency prices and market data
+- **Blockchain**: Check Cronos wallet balances and transactions
+- **GitHub**: Look up repositories and developer profiles
+- **Calculator**: Perform mathematical calculations
+- **Reminders**: Set reminders for upcoming events
+
+When users ask about events (like "remind me about a literature festival"):
+1. First search for the event to find exact dates and details
+2. Provide the information clearly
+3. Offer to set a reminder for them
+
+Always be helpful, accurate, and proactive in suggesting related information.
+Format responses clearly with dates, locations, and links when available.`,
+    tools: allTools,
 });
