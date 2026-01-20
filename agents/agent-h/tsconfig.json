@@ -1,12 +1,22 @@
 {
     "compilerOptions": {
-        "target": "es2020",
+        "target": "es2022",
         "module": "nodenext",
         "moduleResolution": "nodenext",
         "esModuleInterop": true,
         "strict": true,
         "skipLibCheck": true,
-        // set to false to allow CommonJS module syntax:
-        "verbatimModuleSyntax": false
-    }
+        "verbatimModuleSyntax": false,
+        "outDir": "./dist",
+        "rootDir": ".",
+        "declaration": true,
+        "resolveJsonModule": true
+    },
+    "include": [
+        "*.ts"
+    ],
+    "exclude": [
+        "node_modules",
+        "dist"
+    ]
 }

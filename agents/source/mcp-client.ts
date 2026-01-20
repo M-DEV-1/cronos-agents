@@ -71,13 +71,15 @@ export class MCPClientManager {
             }
         }
 
-        // Create transport
+        // Create transport with filtered env (remove undefined values)
+        const envVars = Object.fromEntries(
+            Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
+        );
+
         const transport = new StdioClientTransport({
             command: config.command,
             args: config.args,
-            env: {
-                ...process.env,
-            },
+            env: envVars,
         });
 
         // Create client
