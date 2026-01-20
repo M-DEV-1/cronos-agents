@@ -1,0 +1,22 @@
+{
+  "name": "x402-payment",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "x402 payment module for Cronos blockchain",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "keywords": ["x402", "cronos", "payments", "eip-3009", "agent"],
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^6.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.9.3"
+  }
+}
