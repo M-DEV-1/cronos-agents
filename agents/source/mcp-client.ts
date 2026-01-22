@@ -1,59 +1,10 @@
-/**
- * MCP Client Wrapper
- * Connects ADK agents to MCP servers (Tavily, Brave, GitHub, etc.)
- * 
- * Uses @modelcontextprotocol/sdk to communicate with MCP servers
- */
-
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-/**
- * MCP Server configurations
- */
-export const MCP_SERVER_CONFIGS: Record<string, {
-    command: string;
-    args: string[];
-    envVars: string[];
-    tools: string[];
-}> = {
-    tavily: {
-        command: 'npx',
-        args: ['-y', '@anthropic/tavily-mcp-server'],
-        envVars: ['TAVILY_API_KEY'],
-        tools: ['search'],
-    },
-    brave: {
-        command: 'npx',
-        args: ['-y', '@anthropic/brave-search-mcp-server'],
-        envVars: ['BRAVE_API_KEY'],
-        tools: ['brave_web_search', 'brave_local_search'],
-    },
-    github: {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-github'],
-        envVars: ['GITHUB_TOKEN'],
-        tools: ['search_repositories', 'get_file_contents', 'create_issue'],
-    },
-    filesystem: {
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
-        envVars: [],
-        tools: ['read_file', 'write_file', 'list_directory'],
-    },
-};
-
-/**
- * MCP Client manager
- * Manages connections to multiple MCP servers
- */
 export class MCPClientManager {
     private clients: Map<string, Client> = new Map();
     private transports: Map<string, StdioClientTransport> = new Map();
 
-    /**
-     * Connect to an MCP server
-     */
     async connect(serverName: string): Promise<Client> {
         if (this.clients.has(serverName)) {
             return this.clients.get(serverName)!;
@@ -64,124 +15,96 @@ export class MCPClientManager {
             throw new Error(`Unknown MCP server: ${serverName}`);
         }
 
-        // Check required env vars
-        for (const envVar of config.envVars) {
-            if (!process.env[envVar]) {
-                console.warn(`Warning: ${envVar} not set for ${serverName} MCP server`);
-            }
-        }
-
-        // Create transport with filtered env (remove undefined values)
-        const envVars = Object.fromEntries(
-            Object.entries(process.env).filter((e): e is [string, string] => e[1] !== undefined)
-        );
+        console.log(`Connecting to MCP server: ${serverName}...`);
 
         const transport = new StdioClientTransport({
             command: config.command,
             args: config.args,
-            env: envVars,
+            env: config.envVars.reduce((acc, varName) => {
+                const val = process.env[varName];
+                if (val) acc[varName] = val;
+                return acc;
+            }, {} as Record<string, string>)
         });
 
-        // Create client
         const client = new Client(
-            { name: `adk-${serverName}-client`, version: '1.0.0' },
-            { capabilities: {} }
+            { name: "cronos-agent-client", version: "1.0.0" },
+            { capabilities: { tools: {} } }
         );
 
-        // Connect
         await client.connect(transport);
 
         this.clients.set(serverName, client);
         this.transports.set(serverName, transport);
 
+        console.log(`Connected to ${serverName}`);
         return client;
     }
 
-    /**
-     * Call a tool on an MCP server
-     */
     async callTool(serverName: string, toolName: string, args: Record<string, unknown>): Promise<any> {
         const client = await this.connect(serverName);
-
-        const result = await client.callTool({
+        console.log(`Calling tool ${toolName} on ${serverName}`);
+        return await client.callTool({
             name: toolName,
-            arguments: args,
+            arguments: args
         });
-
-        return result;
     }
 
-    /**
-     * List available tools on an MCP server
-     */
-    async listTools(serverName: string): Promise<any[]> {
-        const client = await this.connect(serverName);
-        const tools = await client.listTools();
-        return tools.tools;
-    }
-
-    /**
-     * Disconnect from an MCP server
-     */
-    async disconnect(serverName: string): Promise<void> {
-        const client = this.clients.get(serverName);
-        const transport = this.transports.get(serverName);
-
-        if (client) {
-            await client.close();
-            this.clients.delete(serverName);
-        }
-
-        if (transport) {
+    async closeAll() {
+        for (const [name, transport] of this.transports) {
+            console.log(`Closing connection to ${name}`);
             await transport.close();
-            this.transports.delete(serverName);
         }
-    }
-
-    /**
-     * Disconnect from all servers
-     */
-    async disconnectAll(): Promise<void> {
-        const serverNames = Array.from(this.clients.keys());
-        await Promise.all(serverNames.map(name => this.disconnect(name)));
+        this.clients.clear();
+        this.transports.clear();
     }
 }
 
-// Singleton instance
 export const mcpManager = new MCPClientManager();
 
 /**
- * Helper function to call Tavily search
+ * MCP Server Configurations
+ * Sourced from mcpmarket.com and official repositories.
  */
-export async function tavilySearch(query: string): Promise<any> {
-    try {
-        return await mcpManager.callTool('tavily', 'search', { query });
-    } catch (error) {
-        console.error('Tavily search failed:', error);
-        return { error: 'Tavily search failed', fallback: true };
+export const MCP_SERVER_CONFIGS: Record<string, {
+    command: string;
+    args: string[];
+    envVars: string[];
+    tools: string[];
+}> = {
+    // Web Search (Official) -> Replaces deprecated @anthropic/brave...
+    brave: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-brave-search'], // Updated package
+        envVars: ['BRAVE_API_KEY'],
+        tools: ['brave_web_search', 'brave_local_search'],
+    },
+    // GitHub
+    github: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        envVars: ['GITHUB_TOKEN'],
+        tools: ['search_repositories', 'get_file_contents', 'create_issue'],
+    },
+    // Filesystem
+    filesystem: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', process.cwd()],
+        envVars: [],
+        tools: ['read_file', 'write_file', 'list_directory'],
+    },
+    // Weather (Official MCP)
+    weather: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-weather'],
+        envVars: ['OPENWEATHERMAP_API_KEY'],
+        tools: ['get_current_weather', 'get_forecast'],
+    },
+    // Time (Official MCP)
+    time: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-time'],
+        envVars: [],
+        tools: ['get_current_time', 'convert_time'],
     }
-}
-
-/**
- * Helper function to call Brave search
- */
-export async function braveSearch(query: string): Promise<any> {
-    try {
-        return await mcpManager.callTool('brave', 'brave_web_search', { query });
-    } catch (error) {
-        console.error('Brave search failed:', error);
-        return { error: 'Brave search failed', fallback: true };
-    }
-}
-
-/**
- * Helper function to search GitHub
- */
-export async function githubSearch(query: string): Promise<any> {
-    try {
-        return await mcpManager.callTool('github', 'search_repositories', { query });
-    } catch (error) {
-        console.error('GitHub search failed:', error);
-        return { error: 'GitHub search failed', fallback: true };
-    }
-}
+};
