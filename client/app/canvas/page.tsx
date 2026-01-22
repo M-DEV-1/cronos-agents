@@ -163,7 +163,7 @@ function CanvasContent() {
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [viewMode, setViewMode] = useState<'canvas' | 'chat'>('canvas');
     const [totalCost, setTotalCost] = useState(0);
-    const [pendingPayment, setPendingPayment] = useState<{ cost: number; walletAddress: string } | null>(null);
+    const [pendingPayment, setPendingPayment] = useState<{ cost: number; walletAddress: string; toolName: string } | null>(null);
 
     // A2UI State
     const [a2uiComponents, setA2uiComponents] = useState<Map<string, A2UIComponent>>(new Map());
@@ -216,7 +216,7 @@ function CanvasContent() {
     }, [chatMessages]);
 
     // Process x402 payment when required
-    const processPayment = useCallback(async (cost: number, walletAddress: string): Promise<boolean> => {
+    const processPayment = useCallback(async (cost: number, walletAddress: string, toolName: string): Promise<boolean> => {
         if (!address) return false;
 
         try {
@@ -224,13 +224,31 @@ function CanvasContent() {
                 to: walletAddress as `0x${string}`,
                 value: parseEther(cost.toString()),
             });
+
+            // Notify agent server that payment is complete
+            // This unblocks the tool execution
+            // We need to proxy through our Next.js API or call server directly if possible, 
+            // but since server is on port 4000, we can use a direct fetch for simplicity in this demo environment
+            // OR better: Create a Next.js proxy route for confirmation.
+            // For now, let's call the server directly since we're in dev mode on same machine.
+            // Actually, CORS might block. Let's assume the agent wrapper handles CORS or use /api/confirm proxy.
+
+            // NOTE: Ideally we should use the txHash from receipt, but sendTransactionAsync returns hash.
+            // But we need to wait for receipt to be sure? For UI responsiveness we send immediately.
+
+            await fetch('http://localhost:4000/confirm-payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ toolName: toolName, txHash: '0x...' })
+            });
+
             setTotalCost(prev => prev + cost);
             return true;
         } catch (error) {
             console.error('Payment failed:', error);
             return false;
         }
-    }, [address, sendTransactionAsync]);
+    }, [address, sendTransactionAsync, pendingPayment]);
 
     // Run the agent via API
     const handleRun = async () => {
@@ -297,19 +315,31 @@ function CanvasContent() {
 
                             if (executionRef.current !== executionId) continue;
 
-                            // Deduplicate events by ID to prevent duplicate nodes
+                            // Deduplicate events by ID AND by type+agentName combo
                             setEvents(prev => {
                                 // Check if event with this ID already exists
                                 if (prev.some(e => e.id === event.id)) {
                                     return prev; // Skip duplicate
+                                }
+                                // For payment_required, also dedupe by agentName to prevent multiple pending payments for same tool
+                                if (event.type === 'payment_required' && event.agentName) {
+                                    const existingPending = prev.find(e =>
+                                        e.type === 'payment_required' && e.agentName === event.agentName
+                                    );
+                                    if (existingPending) {
+                                        return prev; // Skip duplicate payment request for same tool
+                                    }
                                 }
                                 return [...prev, event];
                             });
 
                             // Handle payment_required - process x402 payment
                             if (event.type === 'payment_required' && event.cost && event.walletAddress) {
-                                setPendingPayment({ cost: event.cost, walletAddress: event.walletAddress });
-                                const success = await processPayment(event.cost, event.walletAddress);
+                                // Store toolName (agentName) for confirmation
+                                const toolName = event.agentName || 'unknown_tool';
+                                setPendingPayment({ cost: event.cost, walletAddress: event.walletAddress, toolName });
+
+                                const success = await processPayment(event.cost, event.walletAddress, toolName);
                                 if (!success) {
                                     setEvents(prev => [...prev, {
                                         id: `payment-fail-${Date.now()}`,

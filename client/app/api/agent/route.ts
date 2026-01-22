@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
                             label: 'Agent Error',
                             details: `Agent server returned ${response.status}`,
                         });
-                        controller.close();
+                        if (controller.desiredSize !== null) controller.close();
                         return;
                     }
 
@@ -90,23 +90,29 @@ export async function POST(request: NextRequest) {
                             if (line.startsWith('data: ')) {
                                 const eventData = line.slice(6);
                                 if (eventData.trim()) {
-                                    controller.enqueue(encoder.encode(`data: ${eventData}\n\n`));
+                                    if (controller.desiredSize !== null) {
+                                        controller.enqueue(encoder.encode(`data: ${eventData}\n\n`));
+                                    }
                                 }
                             }
                         }
                     }
                 } catch (error) {
                     console.error('Agent execution error:', error);
-                    emit({
-                        id: `error-${Date.now()}`,
-                        timestamp: Date.now(),
-                        type: 'error',
-                        label: 'Connection Error',
-                        details: error instanceof Error ? error.message : 'Failed to connect to agent server',
-                    });
+                    if (controller.desiredSize !== null) {
+                        emit({
+                            id: `error-${Date.now()}`,
+                            timestamp: Date.now(),
+                            type: 'error',
+                            label: 'Connection Error',
+                            details: error instanceof Error ? error.message : 'Failed to connect to agent server',
+                        });
+                    }
                 }
 
-                controller.close();
+                if (controller.desiredSize !== null) {
+                    controller.close();
+                }
             },
         });
 

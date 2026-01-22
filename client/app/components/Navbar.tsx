@@ -51,6 +51,12 @@ export function Navbar() {
                         >
                             Canvas
                         </Link>
+                        <Link
+                            href="/ledger"
+                            className="px-4 py-2 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all text-sm font-medium"
+                        >
+                            Ledger
+                        </Link>
                     </div>
 
                     {/* Right Side: Wallet + Mobile Menu */}
@@ -103,6 +109,13 @@ export function Navbar() {
                             onClick={() => setMobileMenuOpen(false)}
                         >
                             Canvas
+                        </Link>
+                        <Link
+                            href="/ledger"
+                            className="block px-4 py-3 rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-all"
+                            onClick={() => setMobileMenuOpen(false)}
+                        >
+                            Ledger
                         </Link>
                     </div>
                 )}

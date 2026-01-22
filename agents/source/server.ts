@@ -175,6 +175,17 @@ app.post('/run', async (req: Request, res: Response) => {
     res.end();
 });
 
+// Endpoint to confirm payment and unblock tool execution
+app.post('/confirm-payment', (req, res) => {
+    const { toolName, txHash } = req.body;
+    console.log(`[x402] Received payment confirmation for ${toolName}, tx: ${txHash}`);
+
+    // Emit event to release the blocked PaidToolWrapper
+    paymentEvents.emit('payment_confirmed', { name: toolName });
+
+    res.json({ success: true });
+});
+
 /**
  * Health check endpoint
  */
