@@ -1,4 +1,8 @@
 {
+  "name": "agent-h",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "agent.ts",
   "dependencies": {
     "@google/adk": "^0.2.4",
     "@google/adk-devtools": "^0.2.4",

@@ -29,7 +29,7 @@ export class MCPClientManager {
 
         const client = new Client(
             { name: "cronos-agent-client", version: "1.0.0" },
-            { capabilities: { tools: {} } }
+            { capabilities: {} }
         );
 
         await client.connect(transport);

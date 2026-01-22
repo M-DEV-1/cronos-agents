@@ -2,14 +2,16 @@
 
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Bot, Zap, CheckCircle, Database, Loader2 } from 'lucide-react';
+import { Bot, Zap, CheckCircle, Database, Loader2, Search, Github, Coins, Calendar, Calculator, AlertCircle } from 'lucide-react';
 
 interface AgentNodeData {
     label: string;
     subtitle?: string;
-    type: 'orchestrator' | 'tool' | 'source' | 'result' | 'decision';
-    status?: 'idle' | 'running' | 'complete';
+    type: string;
+    status?: 'idle' | 'running' | 'complete' | 'error';
     cost?: number;
+    icon?: string;
+    description?: string;
 }
 
 interface AgentNodeProps {
@@ -17,40 +19,61 @@ interface AgentNodeProps {
     isConnectable: boolean;
 }
 
-const icons = {
+const icons: Record<string, any> = {
     orchestrator: Bot,
     tool: Zap,
     source: Database,
     result: CheckCircle,
     decision: Zap,
+    search: Search,
+    github: Github,
+    crypto: Coins,
+    events: Calendar,
+    calc: Calculator,
 };
 
 function AgentNode({ data, isConnectable }: AgentNodeProps) {
-    const Icon = icons[data.type] || Bot;
+    const iconName = data.icon || data.type;
+    const Icon = icons[iconName] || icons[data.type] || Bot;
+
+    // Status visual logic
     const isRunning = data.status === 'running';
     const isComplete = data.status === 'complete';
+    const isError = data.status === 'error';
+
+    // Status Icon
+    let StatusIcon = null;
+    let statusColor = 'var(--text-tertiary)';
+
+    if (isRunning) {
+        StatusIcon = Loader2;
+        statusColor = 'var(--accent)';
+    } else if (isComplete) {
+        StatusIcon = CheckCircle;
+        statusColor = 'var(--success)';
+    } else if (isError) {
+        StatusIcon = AlertCircle;
+        statusColor = 'var(--error)';
+    }
 
     return (
-        <div className={`agent-node ${isRunning ? 'running' : ''} ${isComplete ? 'complete' : ''}`}>
+        <div className={`agent-node ${data.status || 'idle'}`}>
             <Handle
                 type="target"
                 position={Position.Left}
                 isConnectable={isConnectable}
                 style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '2px solid var(--border-strong)',
-                    width: 10,
-                    height: 10,
+                    background: 'var(--text-secondary)',
+                    width: 12,
+                    height: 12,
+                    left: -6,
+                    border: '2px solid var(--bg-primary)'
                 }}
             />
 
             <div className="agent-node-header">
-                <div className={`agent-node-icon ${data.type}`}>
-                    {isRunning ? (
-                        <Loader2 className="w-4 h-4 text-white animate-spin" />
-                    ) : (
-                        <Icon className="w-4 h-4 text-white" />
-                    )}
+                <div style={{ color: isRunning ? 'var(--accent)' : 'var(--text-secondary)' }}>
+                    <Icon strokeWidth={1.5} size={24} />
                 </div>
                 <div>
                     <div className="agent-node-title">{data.label}</div>
@@ -58,24 +81,43 @@ function AgentNode({ data, isConnectable }: AgentNodeProps) {
                         <div className="agent-node-subtitle">{data.subtitle}</div>
                     )}
                 </div>
+                {StatusIcon && (
+                    <div style={{ marginLeft: 'auto', color: statusColor }}>
+                        <StatusIcon className={isRunning ? 'animate-spin' : ''} size={20} />
+                    </div>
+                )}
             </div>
 
-            {data.cost !== undefined && data.cost > 0 && (
-                <div className="agent-node-cost">
-                    <Zap className="w-3 h-3" />
-                    {data.cost.toFixed(4)} USDC
+            {/* Content Area - Visible Description */}
+            {data.description && (
+                <div style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.4', borderBottom: '1px solid var(--border)' }}>
+                    {data.description}
                 </div>
             )}
+
+            {/* Footer with Cost */}
+            <div className="agent-node-footer">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Zap size={14} fill={data.cost ? 'currentColor' : 'none'} />
+                    <span style={{ fontWeight: 600 }}>
+                        {data.cost !== undefined ? `${data.cost.toFixed(4)} USDC` : 'FREE'}
+                    </span>
+                </div>
+                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-quaternary)' }}>
+                    ERC-8004
+                </div>
+            </div>
 
             <Handle
                 type="source"
                 position={Position.Right}
                 isConnectable={isConnectable}
                 style={{
-                    background: 'var(--bg-tertiary)',
-                    border: '2px solid var(--border-strong)',
-                    width: 10,
-                    height: 10,
+                    background: 'var(--text-secondary)',
+                    width: 12,
+                    height: 12,
+                    right: -6,
+                    border: '2px solid var(--bg-primary)'
                 }}
             />
         </div>

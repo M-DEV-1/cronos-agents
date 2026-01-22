@@ -4,18 +4,19 @@ import { PaidToolWrapper, paymentEvents } from './pay-wrapper.js';
 import { mcpManager } from './mcp-client.js';
 
 /**
- * UNIQUE WALLET ADDRESSES FOR EACH TOOL
- * These correspond to x402-enabled accounts on Cronos.
+ * UNIQUE WALLET ADDRESSES FOR EACH TOOL (Source Agents)
+ * These are the x402-enabled accounts on Cronos Testnet that receive payments.
+ * Configure these in .env or use defaults for testing.
  */
 const WALLETS = {
-    SEARCH: '0x1234567890123456789012345678901234567890',
-    GITHUB: '0x2234567890123456789012345678901234567890',
-    FILESYSTEM: '0x3234567890123456789012345678901234567890',
-    WEATHER: '0x4234567890123456789012345678901234567890',
-    TIME: '0x5234567890123456789012345678901234567890',
-    CRYPTO: '0x6234567890123456789012345678901234567890', // Custom local tool
-    EVENTS: '0x7234567890123456789012345678901234567890', // Custom local tool
-    CALCULATOR: '0x8234567890123456789012345678901234567890',
+    SEARCH: process.env.WALLET_SEARCH || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    GITHUB: process.env.WALLET_GITHUB || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    FILESYSTEM: process.env.WALLET_FILESYSTEM || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    WEATHER: process.env.WALLET_WEATHER || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    TIME: process.env.WALLET_TIME || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    CRYPTO: process.env.WALLET_CRYPTO || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    EVENTS: process.env.WALLET_EVENTS || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
+    CALCULATOR: process.env.WALLET_CALCULATOR || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
 };
 
 // --- MCP Tools Wrapped in PaidToolWrapper ---
@@ -74,15 +75,34 @@ const cryptoTool = new PaidToolWrapper({
     cost: 0.01,
     walletAddress: WALLETS.CRYPTO,
     handler: async (args: { symbol: string }) => {
-        // Mocking external API call for demo
-        const prices: Record<string, number> = {
-            'BTC': 64230.50,
-            'ETH': 3450.20,
-            'CRO': 0.125,
-            'SOL': 145.60
-        };
-        const price = prices[args.symbol.toUpperCase()] || 0;
-        return { symbol: args.symbol, price, currency: 'USD' };
+        // Use CoinGecko API for real prices
+        try {
+            const coinIds: Record<string, string> = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'CRO': 'crypto-com-chain',
+                'SOL': 'solana',
+            };
+            const coinId = coinIds[args.symbol.toUpperCase()] || args.symbol.toLowerCase();
+            const response = await fetch(
+                `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`
+            );
+            const data = await response.json();
+            const priceData = data[coinId];
+            if (priceData) {
+                return {
+                    symbol: args.symbol,
+                    price: priceData.usd,
+                    change24h: priceData.usd_24h_change,
+                    currency: 'USD'
+                };
+            }
+            // Fallback to search if CoinGecko fails
+            return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
+        } catch {
+            // Fallback to search
+            return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
+        }
     },
 });
 
@@ -92,16 +112,11 @@ const eventsTool = new PaidToolWrapper({
     cost: 0.02,
     walletAddress: WALLETS.EVENTS,
     handler: async (args: { query: string, location?: string }) => {
-        // Mocking event search
-        if (args.query.toLowerCase().includes('literature')) {
-            return {
-                events: [
-                    { name: 'Jaipur Literature Festival', date: '2026-01-23', location: 'Jaipur, India' },
-                    { name: 'London Book Fair', date: '2026-03-10', location: 'London, UK' }
-                ]
-            };
-        }
-        return { events: [] };
+        // Use web search for real event data
+        const searchQuery = args.location
+            ? `${args.query} events ${args.location} 2026`
+            : `${args.query} events upcoming 2026`;
+        return mcpManager.callTool('brave', 'brave_web_search', { query: searchQuery });
     },
 });
 
@@ -127,34 +142,41 @@ const calculatorTool = new PaidToolWrapper({
  * 
  * A multi-tool agent fully integrated with x402 payment wrappers.
  * Every tool call logs a transaction to the ledger and enforces payment logic.
+ * 
+ * The agent can generate A2UI (Agent-to-UI) components for rich visual responses.
  */
+import { A2UI_COMPONENT_SCHEMA } from './a2ui-generator.js';
+
 export const rootAgent = new LlmAgent({
     name: 'source_agent',
     model: 'gemini-2.5-flash',
-    description: 'A paid information agent that retrieves data from various sources via x402-enabled tools.',
-    instruction: `You are a helpful Source Agent.
+    description: 'A paid information agent that retrieves data from various sources via x402-enabled tools and generates rich A2UI interfaces.',
+    instruction: `You are a helpful Source Agent with A2UI capabilities.
     
-    You have access to several Paid Tools. Each tool costs money (USDC) to use.
+    ## Paid Tools (x402)
+    You have access to several tools. Each costs TCRO (Cronos Testnet) to use:
+    - 'web_search' (0.005 TCRO): General web search
+    - 'github_search' (0.002 TCRO): Code/repo search
+    - 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices
+    - 'find_events' (0.02 TCRO): Events/conferences
+    - 'calculator' (0.001 TCRO): Math calculations
+    - 'get_weather' (0.003 TCRO): Weather information
     
-    Your goal is to answer the user's request efficiently using these tools.
-    - For general questions, use 'web_search'.
-    - For code/repo questions, use 'github_search'.
-    - For prices, use 'get_crypto_price'.
-    - For events, use 'find_events'.
+    ## A2UI: Rich Visual Responses
+    When your response would benefit from visual presentation (lists, prices, events, cards, forms), 
+    generate A2UI JSON to create interactive UI components.
     
-    Always summarize the results clearly.`,
+    ${A2UI_COMPONENT_SCHEMA}
+    
+    ## Guidelines
+    1. Use tools to gather information
+    2. Summarize results in natural language
+    3. When appropriate, also return A2UI JSON for rich presentation
+    4. Mark paid/premium data with isPaid: true in PriceTracker components
+    5. Include actions for interactive elements (alerts, details buttons)
+    `,
 
-    // We pass the wrapper's direct execution function or the wrapper object if ADK supports it. 
-    // Assuming ADK takes a function or a compatible object. 
-    // If ADK needs a specific shape, we map it here.
-    // For now, assuming ADK accepts the wrapper as a tool-like object or we wrap it in a FunctionTool.
-    // We will assume we need to adapt it to FunctionTool format if PaidToolWrapper isn't directly compatible.
-    // *Self-Correction*: PaidToolWrapper isn't an ADK Tool type. We need to wrap it.
-    tools: [
-        // We'll trust the ADK to execute the 'execute' method if we pass it, or we define it as a callable.
-        // Actually, let's map them to simple functions for the agent config if needed, 
-        // but for this file, let's assume we export them as the tools list.
-    ],
+    tools: [],
 });
 
 // Helper to convert PaidToolWrapper to ADK Tool format (FunctionTool)

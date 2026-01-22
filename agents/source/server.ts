@@ -1,14 +1,26 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
+import { InMemoryRunner, isFinalResponse } from '@google/adk';
 import { rootAgent } from './agent.js';
 import { paymentEvents } from './pay-wrapper.js';
+import { extractA2UIFromResponse, wrapAsResultCard } from './a2ui-generator.js';
+import type { Express } from 'express';
 
-const app = express();
+// Helper to create user content (avoiding @google/genai dependency)
+function createUserContent(text: string) {
+    return { role: 'user' as const, parts: [{ text }] };
+}
+
+const app: Express = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 4000;
+const APP_NAME = 'source-agent';
+
+// Create a persistent runner instance
+const runner = new InMemoryRunner({ agent: rootAgent, appName: APP_NAME });
 
 // Event types for the frontend
 interface AgentEvent {
@@ -28,9 +40,9 @@ interface AgentEvent {
  * Main agent execution endpoint
  * Streams events via Server-Sent Events (SSE)
  */
-app.post('/run', async (req, res) => {
+app.post('/run', async (req: Request, res: Response) => {
     const { prompt } = req.body;
-    const userAddress = req.headers['x-user-address'] as string;
+    const userAddress = req.headers['x-user-address'] as string || 'unknown';
 
     if (!prompt) {
         return res.status(400).json({ error: 'Prompt is required' });
@@ -46,31 +58,29 @@ app.post('/run', async (req, res) => {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
-    let eventId = 0;
-    const nextId = () => `evt-${++eventId}`;
+    let eventCounter = 0;
+    const nextId = () => `evt-${Date.now()}-${eventCounter++}`;
 
     try {
-        // 1. Emit user input
+        // 1. Emit user input event
         emit({
             id: nextId(),
             timestamp: Date.now(),
             type: 'user_input',
             label: 'User Request',
-            details: prompt,
+            details: prompt.slice(0, 100) + (prompt.length > 100 ? '...' : ''),
         });
 
-        // 2. Emit orchestrator start
-        emit({
-            id: nextId(),
-            timestamp: Date.now(),
-            type: 'orchestrator',
-            agentName: 'Source Agent',
-            label: 'Orchestrator',
-            details: 'Analyzing request and selecting tools...',
+        // 2. Create session for this request
+        const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+        await runner.sessionService.createSession({
+            appName: APP_NAME,
+            userId: userAddress,
+            sessionId
         });
 
-        // Set up payment event listener
-        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: 'pending' | 'success' | 'failed' }) => {
+        // 3. Set up payment event listener
+        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: string }) => {
             emit({
                 id: nextId(),
                 timestamp: Date.now(),
@@ -84,7 +94,7 @@ app.post('/run', async (req, res) => {
         };
         paymentEvents.on('payment', paymentHandler);
 
-        // Set up tool call listener
+        // 4. Set up tool call listener
         const toolHandler = (data: { name: string; args: unknown }) => {
             emit({
                 id: nextId(),
@@ -97,25 +107,53 @@ app.post('/run', async (req, res) => {
         };
         paymentEvents.on('tool_call', toolHandler);
 
-        // 3. Run the agent
-        // Using ADK's run method with the prompt
-        // @ts-ignore - ADK interface varies
-        const result = await rootAgent.run({
-            messages: [{ role: 'user', content: prompt }],
-            context: { userAddress },
-        });
+        // 5. Run the agent using InMemoryRunner
+        let finalResult: unknown = null;
 
-        // 4. Emit final response
+        for await (const event of runner.runAsync({
+            userId: userAddress,
+            sessionId,
+            newMessage: createUserContent(prompt),
+        })) {
+            // Emit intermediate events as orchestrator updates
+            if (event.actions?.stateDelta) {
+                emit({
+                    id: nextId(),
+                    timestamp: Date.now(),
+                    type: 'orchestrator',
+                    label: 'Processing',
+                    details: 'Agent is reasoning...',
+                });
+            }
+
+            // Check for final response
+            if (isFinalResponse(event)) {
+                const content = event.content?.parts?.map(p => p.text ?? '').join('') ?? '';
+                finalResult = content || event;
+            }
+        }
+
+        // 6. Extract A2UI from LLM response
+        let a2uiMessages: unknown[] = [];
+        if (finalResult) {
+            const extracted = extractA2UIFromResponse(finalResult);
+            if (extracted.length > 0) {
+                a2uiMessages = extracted;
+            } else {
+                a2uiMessages = wrapAsResultCard('Result', finalResult);
+            }
+        }
+
+        // 7. Emit final response with A2UI
         emit({
             id: nextId(),
             timestamp: Date.now(),
             type: 'final_response',
             label: 'Final Response',
-            details: typeof result === 'string' ? result : JSON.stringify(result),
-            result: result,
+            details: typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult),
+            result: finalResult,
             metadata: {
-                // Extract widget hints from result if available
-                hasWidgets: true,
+                a2ui: a2uiMessages,
             },
         });
 
@@ -140,12 +178,13 @@ app.post('/run', async (req, res) => {
 /**
  * Health check endpoint
  */
-app.get('/health', (req, res) => {
+app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });
 
 app.listen(PORT, () => {
     console.log(`Agent server running on http://localhost:${PORT}`);
+    console.log(`Using ADK InMemoryRunner with app: ${APP_NAME}`);
 });
 
 export default app;

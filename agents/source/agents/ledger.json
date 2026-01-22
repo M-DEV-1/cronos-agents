@@ -1,0 +1,42 @@
+[
+  {
+    "timestamp": "2026-01-22T02:06:23.441Z",
+    "toolName": "github_search",
+    "walletAddress": "0x2234567890123456789012345678901234567890",
+    "cost": 0.002,
+    "currency": "USDC",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T02:06:24.442Z",
+    "toolName": "github_search",
+    "walletAddress": "0x2234567890123456789012345678901234567890",
+    "cost": 0.002,
+    "currency": "USDC",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T02:06:35.619Z",
+    "toolName": "github_search",
+    "walletAddress": "0x2234567890123456789012345678901234567890",
+    "cost": 0.002,
+    "currency": "USDC",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-22T02:06:41.681Z",
+    "toolName": "github_search",
+    "walletAddress": "0x2234567890123456789012345678901234567890",
+    "cost": 0.002,
+    "currency": "USDC",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T02:06:42.682Z",
+    "toolName": "github_search",
+    "walletAddress": "0x2234567890123456789012345678901234567890",
+    "cost": 0.002,
+    "currency": "USDC",
+    "status": "completed"
+  }
+]
