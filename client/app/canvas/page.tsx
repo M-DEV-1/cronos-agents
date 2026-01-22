@@ -23,8 +23,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { useAccount, useSendTransaction, useSwitchChain, useChainId } from 'wagmi';
 import { cronosTestnet } from 'wagmi/chains';
 import { parseEther } from 'viem';
-import { A2UIRenderer, parseA2UIStream } from '../components/A2UIRenderer';
-import type { A2UIMessage, A2UIComponent, A2UIUserAction } from '../types/a2ui';
+import A2UIRenderer from '../components/A2UIRenderer';
+import type { A2UIMessage } from '../types/a2ui';
 
 // --- TYPES ---
 type EventType = 'user_input' | 'orchestrator' | 'payment_required' | 'payment_success' | 'payment_failed' | 'tool_call' | 'tool_result' | 'final_response' | 'error';
@@ -168,9 +168,7 @@ function CanvasContent() {
     const [pendingPayment, setPendingPayment] = useState<{ cost: number; walletAddress: string; toolName: string } | null>(null);
 
     // A2UI State
-    const [a2uiComponents, setA2uiComponents] = useState<Map<string, A2UIComponent>>(new Map());
-    const [a2uiRootId, setA2uiRootId] = useState<string | null>(null);
-    const [a2uiDataModel, setA2uiDataModel] = useState<Record<string, unknown>>({});
+    const [a2uiMessages, setA2UIMessages] = useState<A2UIMessage[]>([]);
 
     const executionRef = useRef(0);
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -369,14 +367,9 @@ function CanvasContent() {
 
                             // Handle final_response - process A2UI from metadata
                             if (event.type === 'final_response' && event.metadata?.a2ui) {
-                                const a2uiMessages = event.metadata.a2ui as A2UIMessage[];
-                                const { components, rootId, dataModel } = parseA2UIStream(a2uiMessages);
-                                if (rootId && components.size > 0) {
-                                    setA2uiComponents(components);
-                                    setA2uiRootId(rootId);
-                                    setA2uiDataModel(dataModel);
-                                    setIsSidebarOpen(true);
-                                }
+                                const msgs = event.metadata.a2ui as A2UIMessage[];
+                                setA2UIMessages(msgs);
+                                setIsSidebarOpen(true);
                             }
                         } catch (e) {
                             console.error('Failed to parse event:', e);
@@ -576,18 +569,16 @@ function CanvasContent() {
                     </div>
 
                     <div className="h-full overflow-y-auto p-4 lg:p-6 lg:pt-6">
-                        {a2uiRootId && a2uiComponents.size > 0 ? (
+                        {a2uiMessages.length > 0 ? (
                             <A2UIRenderer
-                                components={a2uiComponents}
-                                rootId={a2uiRootId}
-                                dataModel={a2uiDataModel}
+                                messages={a2uiMessages}
                                 onAction={async (payload) => {
                                     console.log('A2UI User Action:', payload);
                                     try {
                                         await fetch('/api/action', {
                                             method: 'POST',
                                             headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify(payload.userAction),
+                                            body: JSON.stringify(payload),
                                         });
                                     } catch (e) {
                                         console.error('Failed to send action:', e);

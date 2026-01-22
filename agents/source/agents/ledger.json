@@ -118,5 +118,125 @@
     "cost": 0.002,
     "currency": "TCRO",
     "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:22.996Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:38.830Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:44.128Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:44.135Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:47.406Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:47.414Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:48.973Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:49.422Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:52.477Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T03:44:52.477Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T03:51:06.831Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:51:21.823Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
+  },
+  {
+    "timestamp": "2026-01-22T03:51:24.934Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-22T03:51:27.001Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "pending"
+  },
+  {
+    "timestamp": "2026-01-22T03:51:29.726Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed"
   }
 ]
