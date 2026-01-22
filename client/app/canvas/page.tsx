@@ -11,62 +11,32 @@ import {
     BackgroundVariant,
     type Node,
     type Edge,
-    Panel,
     useReactFlow,
     ReactFlowProvider,
 } from '@xyflow/react';
 import dagre from 'dagre';
-import { Zap, Layers, X, Play, Calendar, Bell, TrendingUp, Grid3X3, MessageSquare, AlertTriangle, Loader2 } from 'lucide-react';
+import { Zap, Layers, X, Play, Loader2, AlertTriangle, Grid3X3, MessageSquare } from 'lucide-react';
 import AgentNode from '../components/AgentNode';
 import { Navbar } from '../components/Navbar';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { useAccount, useSendTransaction, useSwitchChain, useChainId } from 'wagmi';
 import { cronosTestnet } from 'wagmi/chains';
 import { parseEther } from 'viem';
 import A2UIRenderer from '../components/A2UIRenderer';
 import type { A2UIMessage } from '../types/a2ui';
-
-// --- TYPES ---
-type EventType = 'user_input' | 'orchestrator' | 'payment_required' | 'payment_success' | 'payment_failed' | 'tool_call' | 'tool_result' | 'final_response' | 'error';
-
-interface AgentEvent {
-    id: string;
-    timestamp: number;
-    type: EventType;
-    agentName?: string;
-    label: string;
-    details?: string;
-    cost?: number;
-    walletAddress?: string;
-    result?: unknown;
-    metadata?: Record<string, unknown>;
-}
-
-interface A2UIWidget {
-    id: string;
-    type: 'event_card' | 'reminder' | 'price_alert' | 'search_result' | 'generic';
-    title: string;
-    data: Record<string, unknown>;
-}
-
-interface ChatMessage {
-    id: string;
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-    timestamp: number;
-    cost?: number;
-}
+import type { ExecutionRun, ExecutionStep, StepStatus } from '../types/execution';
 
 const nodeTypes = { agent: AgentNode };
 
 // --- DAGRE LAYOUT ---
-const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => {
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+    if (nodes.length === 0) return { nodes: [], edges: [] };
+
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    dagreGraph.setGraph({ rankdir: direction, nodesep: 80, ranksep: 120 });
+    dagreGraph.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 });
 
     nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, { width: 280, height: 140 });
+        dagreGraph.setNode(node.id, { width: 260, height: 90 });
     });
 
     edges.forEach((edge) => {
@@ -80,8 +50,8 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => 
         return {
             ...node,
             position: {
-                x: nodeWithPosition.x - 140,
-                y: nodeWithPosition.y - 70,
+                x: nodeWithPosition.x - 130,
+                y: nodeWithPosition.y - 45,
             },
         };
     });
@@ -89,60 +59,14 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => 
     return { nodes: layoutedNodes, edges };
 };
 
-// --- WIDGET GENERATOR (A2UI) ---
-const generateWidgets = (result: unknown): A2UIWidget[] => {
-    const widgets: A2UIWidget[] = [];
-
-    if (!result || typeof result !== 'object') return widgets;
-
-    const data = result as Record<string, unknown>;
-
-    // Check for event data
-    if (data.events && Array.isArray(data.events)) {
-        for (const event of data.events.slice(0, 3)) {
-            widgets.push({
-                id: `widget-event-${Date.now()}-${Math.random()}`,
-                type: 'event_card',
-                title: String(event.name || 'Event'),
-                data: event,
-            });
-        }
-    }
-
-    // Check for price data
-    if (data.price !== undefined || data.symbol) {
-        widgets.push({
-            id: `widget-price-${Date.now()}`,
-            type: 'price_alert',
-            title: `${data.symbol || 'Price'} Price`,
-            data: data,
-        });
-    }
-
-    // Check for search results
-    if (data.results && Array.isArray(data.results)) {
-        for (const result of data.results.slice(0, 3)) {
-            widgets.push({
-                id: `widget-search-${Date.now()}-${Math.random()}`,
-                type: 'search_result',
-                title: String(result.title || 'Result'),
-                data: result,
-            });
-        }
-    }
-
-    // Fallback: create generic widget if we have data but no specific type matched
-    if (widgets.length === 0 && Object.keys(data).length > 0) {
-        widgets.push({
-            id: `widget-generic-${Date.now()}`,
-            type: 'generic',
-            title: 'Result',
-            data: data,
-        });
-    }
-
-    return widgets;
-};
+// Chat message type
+interface ChatMessage {
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    timestamp: number;
+    cost?: number;
+}
 
 function CanvasContent() {
     const searchParams = useSearchParams();
@@ -157,78 +81,78 @@ function CanvasContent() {
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
     const reactFlowInstance = useReactFlow();
 
-    const [events, setEvents] = useState<AgentEvent[]>([]);
+    // View mode - canvas or chat
+    const [viewMode, setViewMode] = useState<'canvas' | 'chat'>('canvas');
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-    const [widgets, setWidgets] = useState<A2UIWidget[]>([]);
+    const chatEndRef = useRef<HTMLDivElement>(null);
+
+    // Execution state
+    const [run, setRun] = useState<ExecutionRun | null>(null);
     const [isExecuting, setIsExecuting] = useState(false);
     const [prompt, setPrompt] = useState(promptParam);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    const [viewMode, setViewMode] = useState<'canvas' | 'chat'>('canvas');
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [totalCost, setTotalCost] = useState(0);
     const [pendingPayment, setPendingPayment] = useState<{ cost: number; walletAddress: string; toolName: string } | null>(null);
 
-    // A2UI State
+    // A2UI State - store raw result for display
     const [a2uiMessages, setA2UIMessages] = useState<A2UIMessage[]>([]);
+    const [lastResult, setLastResult] = useState<string | null>(null);
 
-    const executionRef = useRef(0);
-    const chatEndRef = useRef<HTMLDivElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
-
-    // Event to Node Mapper with Dagre Layout
-    useEffect(() => {
-        if (events.length === 0) {
-            setNodes([]);
-            setEdges([]);
-            return;
-        }
-
-        const rawNodes: Node[] = events.map((ev) => ({
-            id: ev.id,
-            type: 'agent',
-            position: { x: 0, y: 0 },
-            data: {
-                label: ev.label,
-                subtitle: ev.agentName || ev.type.replace(/_/g, ' ').toUpperCase(),
-                type: ev.type,
-                status: ev.type === 'payment_failed' || ev.type === 'error' ? 'error' : (ev.id === events[events.length - 1].id && isExecuting ? 'running' : 'complete'),
-                description: ev.details,
-                cost: ev.cost,
-            }
-        }));
-
-        const rawEdges: Edge[] = events.slice(0, -1).map((ev, index) => ({
-            id: `edge-${index}`,
-            source: ev.id,
-            target: events[index + 1].id,
-            animated: isExecuting && index === events.length - 2,
-            type: 'default',
-        }));
-
-        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges, 'LR');
-        setNodes(layoutedNodes);
-        setEdges(layoutedEdges);
-        setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 500 }), 100);
-    }, [events, isExecuting, reactFlowInstance, setNodes, setEdges]);
 
     // Scroll chat to bottom
     useEffect(() => {
         chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [chatMessages]);
 
-    // Process x402 payment when required
+    // Map ExecutionSteps to React Flow nodes
+    useEffect(() => {
+        if (!run || run.steps.length === 0) {
+            setNodes([]);
+            setEdges([]);
+            return;
+        }
+
+        const rawNodes: Node[] = run.steps.map((step) => ({
+            id: step.stepId,
+            type: 'agent',
+            position: { x: 0, y: 0 },
+            data: {
+                label: step.label,
+                kind: step.kind,
+                status: step.status,
+                description: step.description,
+                toolName: step.toolName,
+                mcpServer: step.mcpServer,
+                cost: step.cost,
+            }
+        }));
+
+        const rawEdges: Edge[] = run.steps.slice(0, -1).map((step, index) => ({
+            id: `edge-${index}`,
+            source: step.stepId,
+            target: run.steps[index + 1].stepId,
+            animated: run.steps[index + 1].status === 'running',
+            style: {
+                stroke: run.steps[index + 1].status === 'running' ? '#3B8A8C' : 'var(--text-quaternary)',
+                strokeWidth: 2,
+            },
+        }));
+
+        const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges, 'TB');
+        setNodes(layoutedNodes);
+        setEdges(layoutedEdges);
+
+        setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 400 }), 100);
+    }, [run, reactFlowInstance, setNodes, setEdges]);
+
+    // Payment processing
     const processPayment = useCallback(async (cost: number, walletAddress: string, toolName: string): Promise<boolean> => {
         if (!address) return false;
 
         try {
-            // Force switch to Cronos Testnet if on wrong chain
             if (chainId !== cronosTestnet.id) {
-                try {
-                    await switchChainAsync({ chainId: cronosTestnet.id });
-                } catch (switchError) {
-                    console.error('Failed to switch network:', switchError);
-                    alert("Please switch your wallet to Cronos Testnet");
-                    return false;
-                }
+                await switchChainAsync({ chainId: cronosTestnet.id });
             }
 
             const hash = await sendTransactionAsync({
@@ -236,22 +160,11 @@ function CanvasContent() {
                 value: parseEther(cost.toString()),
             });
 
-            // Call confirmation proxy (avoids CORS)
             await fetch('/api/confirm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    toolName: toolName,
-                    txHash: hash
-                })
+                body: JSON.stringify({ toolName, txHash: hash })
             });
-
-            // Update local state if needed (e.g. to show link immediately)
-            // But usually the backend emits 'payment_success' with details soon.
-            // We can optimistic update here if desired, but let's rely on server event stream.
-
-            setTotalCost(prev => prev + cost);
-            return true;
 
             setTotalCost(prev => prev + cost);
             return true;
@@ -259,9 +172,25 @@ function CanvasContent() {
             console.error('Payment failed:', error);
             return false;
         }
-    }, [address, sendTransactionAsync, pendingPayment]);
+    }, [address, sendTransactionAsync, switchChainAsync, chainId]);
 
-    // Run the agent via API
+    // Update step status
+    const updateStepStatus = useCallback((stepId: string, status: StepStatus, updates?: Partial<ExecutionStep>) => {
+        setRun(prev => {
+            if (!prev) return prev;
+            return {
+                ...prev,
+                steps: prev.steps.map(step =>
+                    step.stepId === stepId
+                        ? { ...step, status, ...updates }
+                        : step
+                ),
+                updatedAt: Date.now(),
+            };
+        });
+    }, []);
+
+    // Run agent
     const handleRun = async () => {
         if (!prompt.trim()) return;
         if (!isConnected || !address) {
@@ -269,38 +198,46 @@ function CanvasContent() {
             return;
         }
 
-        const executionId = executionRef.current + 1;
-        executionRef.current = executionId;
-
-        // Abort any previous request
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
         abortControllerRef.current = new AbortController();
 
         setIsExecuting(true);
-        setEvents([]);
-        setWidgets([]);
-        setChatMessages(prev => [...prev, { id: `user-${Date.now()}`, role: 'user', content: prompt, timestamp: Date.now() }]);
+        setA2UIMessages([]);
+        setLastResult(null);
+
+        // Add user message to chat
+        setChatMessages(prev => [...prev, {
+            id: `user-${Date.now()}`,
+            role: 'user',
+            content: prompt,
+            timestamp: Date.now(),
+        }]);
+
+        const newRun: ExecutionRun = {
+            runId: `run_${Date.now()}`,
+            prompt,
+            steps: [],
+            status: 'planning',
+            totalCost: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+        };
+        setRun(newRun);
 
         let workflowCost = 0;
+        let finalResultText = '';
 
         try {
             const response = await fetch('/api/agent', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    prompt,
-                    userAddress: address,
-                }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, userAddress: address }),
                 signal: abortControllerRef.current.signal,
             });
 
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
 
             const reader = response.body?.getReader();
             if (!reader) throw new Error('No response body');
@@ -322,54 +259,141 @@ function CanvasContent() {
                         if (!eventData) continue;
 
                         try {
-                            const event: AgentEvent = JSON.parse(eventData);
+                            const event = JSON.parse(eventData);
 
-                            if (executionRef.current !== executionId) continue;
-
-                            // Deduplicate events by ID AND by type+agentName combo
-                            setEvents(prev => {
-                                // Check if event with this ID already exists
-                                if (prev.some(e => e.id === event.id)) {
-                                    return prev; // Skip duplicate
-                                }
-                                // For payment_required, also dedupe by agentName to prevent multiple pending payments for same tool
-                                if (event.type === 'payment_required' && event.agentName) {
-                                    const existingPending = prev.find(e =>
-                                        e.type === 'payment_required' && e.agentName === event.agentName
-                                    );
-                                    if (existingPending) {
-                                        return prev; // Skip duplicate payment request for same tool
+                            switch (event.type) {
+                                case 'run_started':
+                                    if (event.steps) {
+                                        setRun(prev => prev ? {
+                                            ...prev,
+                                            runId: event.runId || prev.runId,
+                                            steps: event.steps,
+                                            status: 'executing',
+                                        } : prev);
                                     }
-                                }
-                                return [...prev, event];
-                            });
-
-                            // Handle payment_required - process x402 payment
-                            if (event.type === 'payment_required' && event.cost && event.walletAddress) {
-                                // Store toolName (agentName) for confirmation
-                                const toolName = event.agentName || 'unknown_tool';
-                                setPendingPayment({ cost: event.cost, walletAddress: event.walletAddress, toolName });
-
-                                const success = await processPayment(event.cost, event.walletAddress, toolName);
-                                if (!success) {
-                                    setEvents(prev => [...prev, {
-                                        id: `payment-fail-${Date.now()}`,
-                                        timestamp: Date.now(),
-                                        type: 'payment_failed',
-                                        label: 'Payment Failed',
-                                        details: 'x402 transaction rejected by user',
-                                    }]);
                                     break;
-                                }
-                                workflowCost += event.cost;
-                                setPendingPayment(null);
-                            }
 
-                            // Handle final_response - process A2UI from metadata
-                            if (event.type === 'final_response' && event.metadata?.a2ui) {
-                                const msgs = event.metadata.a2ui as A2UIMessage[];
-                                setA2UIMessages(msgs);
-                                setIsSidebarOpen(true);
+                                case 'step_started':
+                                    updateStepStatus(event.stepId, 'running', { startedAt: Date.now() });
+                                    break;
+
+                                case 'step_completed':
+                                    updateStepStatus(event.stepId, 'completed', {
+                                        completedAt: Date.now(),
+                                        result: event.result,
+                                        cost: event.cost,
+                                    });
+                                    if (event.cost) workflowCost += event.cost;
+                                    break;
+
+                                case 'step_failed':
+                                    updateStepStatus(event.stepId, 'failed');
+                                    break;
+
+                                case 'a2ui':
+                                    if (event.a2ui && Array.isArray(event.a2ui)) {
+                                        setA2UIMessages(event.a2ui);
+                                        setIsSidebarOpen(true);
+                                    }
+                                    break;
+
+                                case 'payment_required':
+                                    if (event.cost && event.walletAddress) {
+                                        setPendingPayment({
+                                            cost: event.cost,
+                                            walletAddress: event.walletAddress,
+                                            toolName: event.toolName || 'tool'
+                                        });
+                                        const success = await processPayment(event.cost, event.walletAddress, event.toolName);
+                                        if (!success && event.stepId) {
+                                            updateStepStatus(event.stepId, 'failed');
+                                        }
+                                        setPendingPayment(null);
+                                    }
+                                    break;
+
+                                case 'run_completed':
+                                    setRun(prev => prev ? { ...prev, status: 'completed', totalCost: workflowCost } : prev);
+                                    break;
+
+                                case 'run_failed':
+                                    setRun(prev => prev ? { ...prev, status: 'failed' } : prev);
+                                    break;
+
+                                // Legacy events for backward compatibility
+                                case 'user_input':
+                                    setRun(prev => {
+                                        if (!prev) return prev;
+                                        const intentStep: ExecutionStep = {
+                                            stepId: `step_intent_${Date.now()}`,
+                                            kind: 'intent',
+                                            label: 'Understanding Request',
+                                            description: event.details,
+                                            status: 'completed',
+                                            cost: 0,
+                                        };
+                                        return { ...prev, steps: [...prev.steps, intentStep], status: 'executing' };
+                                    });
+                                    break;
+
+                                case 'tool_call':
+                                    setRun(prev => {
+                                        if (!prev) return prev;
+                                        const toolStep: ExecutionStep = {
+                                            stepId: `step_tool_${Date.now()}`,
+                                            kind: 'tool',
+                                            label: event.label || event.agentName || 'Tool Call',
+                                            toolName: event.agentName,
+                                            status: 'running',
+                                            cost: event.cost || 0.01,
+                                        };
+                                        return { ...prev, steps: [...prev.steps, toolStep] };
+                                    });
+                                    break;
+
+                                case 'final_response':
+                                    // Capture result for display
+                                    const resultText = event.details || 'Completed';
+                                    finalResultText = resultText;
+                                    setLastResult(resultText);
+
+                                    // Extract A2UI if present
+                                    if (event.metadata?.a2ui && Array.isArray(event.metadata.a2ui)) {
+                                        setA2UIMessages(event.metadata.a2ui);
+                                        setIsSidebarOpen(true);
+                                    }
+
+                                    // Mark tool steps complete, add UI step
+                                    setRun(prev => {
+                                        if (!prev) return prev;
+                                        const updatedSteps = prev.steps.map(s =>
+                                            s.status === 'running' ? { ...s, status: 'completed' as StepStatus } : s
+                                        );
+                                        const uiStep: ExecutionStep = {
+                                            stepId: `step_ui_${Date.now()}`,
+                                            kind: 'ui',
+                                            label: 'Results',
+                                            status: 'completed',
+                                            cost: 0,
+                                        };
+                                        return { ...prev, steps: [...updatedSteps, uiStep], status: 'completed' };
+                                    });
+                                    break;
+
+                                case 'error':
+                                    setRun(prev => {
+                                        if (!prev) return prev;
+                                        const errorStep: ExecutionStep = {
+                                            stepId: `step_error_${Date.now()}`,
+                                            kind: 'intent',
+                                            label: 'Error',
+                                            description: event.details,
+                                            status: 'failed',
+                                            cost: 0,
+                                        };
+                                        return { ...prev, steps: [...prev.steps, errorStep], status: 'failed' };
+                                    });
+                                    break;
                             }
                         } catch (e) {
                             console.error('Failed to parse event:', e);
@@ -378,28 +402,20 @@ function CanvasContent() {
                 }
             }
 
-            if (executionRef.current === executionId) {
-                const lastEvent = events[events.length - 1];
+            // Add assistant message to chat
+            if (finalResultText) {
                 setChatMessages(prev => [...prev, {
                     id: `assistant-${Date.now()}`,
                     role: 'assistant',
-                    content: lastEvent?.details || 'Task completed.',
+                    content: finalResultText,
                     timestamp: Date.now(),
                     cost: workflowCost > 0 ? workflowCost : undefined,
                 }]);
             }
         } catch (error) {
-            if ((error as Error).name === 'AbortError') {
-                console.log('Request aborted');
-            } else {
+            if ((error as Error).name !== 'AbortError') {
                 console.error('Agent execution error:', error);
-                setEvents(prev => [...prev, {
-                    id: `error-${Date.now()}`,
-                    timestamp: Date.now(),
-                    type: 'error',
-                    label: 'Error',
-                    details: error instanceof Error ? error.message : 'Unknown error',
-                }]);
+                setRun(prev => prev ? { ...prev, status: 'failed' } : prev);
                 setChatMessages(prev => [...prev, {
                     id: `system-${Date.now()}`,
                     role: 'system',
@@ -409,61 +425,90 @@ function CanvasContent() {
             }
         }
 
-        if (executionRef.current === executionId) {
-            setIsExecuting(false);
-            setPendingPayment(null);
-        }
-
+        setIsExecuting(false);
+        setPendingPayment(null);
+        setTotalCost(prev => prev + workflowCost);
         setPrompt('');
+    };
+
+    // Handle A2UI actions
+    const handleA2UIAction = async (payload: unknown) => {
+        console.log('A2UI Action:', payload);
+        try {
+            await fetch('/api/action', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ runId: run?.runId, action: payload }),
+            });
+        } catch (e) {
+            console.error('Failed to send action:', e);
+        }
     };
 
     return (
         <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
             <Navbar />
 
-            <div className="flex-1 flex pt-20 lg:pt-24 overflow-hidden">
+            <div className="flex-1 flex pt-16 overflow-hidden">
                 {/* Main Content Area */}
                 <div className="flex-1 relative flex flex-col">
 
-                    {/* View Toggle - Centered */}
-                    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex glass rounded-xl p-1">
-                        <button
-                            onClick={() => setViewMode('canvas')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${viewMode === 'canvas'
-                                ? 'bg-[var(--accent)] text-white'
-                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                                }`}
-                        >
-                            <Grid3X3 size={16} />
-                            <span className="hidden sm:inline">Canvas</span>
-                        </button>
-                        <button
-                            onClick={() => setViewMode('chat')}
-                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${viewMode === 'chat'
-                                ? 'bg-[var(--accent)] text-white'
-                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                                }`}
-                        >
-                            <MessageSquare size={16} />
-                            <span className="hidden sm:inline">Chat</span>
-                        </button>
+                    {/* Top Bar */}
+                    <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between">
+                        {/* View Mode Toggle */}
+                        <div className="glass rounded-xl p-1 flex">
+                            <button
+                                onClick={() => setViewMode('canvas')}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'canvas'
+                                        ? 'bg-[var(--accent)] text-white'
+                                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                    }`}
+                            >
+                                <Grid3X3 size={14} />
+                                Canvas
+                            </button>
+                            <button
+                                onClick={() => setViewMode('chat')}
+                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'chat'
+                                        ? 'bg-[var(--accent)] text-white'
+                                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                                    }`}
+                            >
+                                <MessageSquare size={14} />
+                                Chat
+                            </button>
+                        </div>
+
+                        {/* Run Status + Cost */}
+                        <div className="flex items-center gap-3">
+                            {run && (
+                                <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${run.status === 'executing' ? 'bg-[var(--accent)] animate-pulse' :
+                                            run.status === 'completed' ? 'bg-[var(--success)]' :
+                                                run.status === 'failed' ? 'bg-[var(--error)]' :
+                                                    'bg-[var(--text-tertiary)]'
+                                        }`} />
+                                    <span className="text-xs text-[var(--text-secondary)] capitalize">
+                                        {run.status} • {run.steps.length} steps
+                                    </span>
+                                </div>
+                            )}
+                            <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2">
+                                <Zap size={12} className="text-[var(--warning)]" />
+                                <span className="text-sm font-mono text-[var(--text-primary)]">
+                                    {totalCost.toFixed(4)} TCRO
+                                </span>
+                            </div>
+                        </div>
                     </div>
 
-                    {/* Cost Display */}
-                    <div className="absolute top-4 right-4 z-20 glass rounded-xl px-4 py-2 flex items-center gap-2">
-                        <Zap size={16} className="text-[var(--warning)]" />
-                        <span className="text-sm font-mono text-[var(--text-primary)]">{totalCost.toFixed(4)} TCRO</span>
-                    </div>
-
-                    {/* Pending Payment Overlay */}
+                    {/* Payment Overlay */}
                     {pendingPayment && (
                         <div className="absolute inset-0 z-30 bg-black/60 flex items-center justify-center">
                             <div className="glass-strong rounded-2xl p-8 text-center max-w-md">
                                 <Loader2 size={48} className="animate-spin text-[var(--accent)] mx-auto mb-4" />
-                                <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-2">x402 Payment Required</h3>
-                                <p className="text-[var(--text-secondary)] mb-4">
-                                    Confirm the transaction in your wallet
-                                </p>
+                                <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-2">x402 Payment</h3>
+                                <p className="text-[var(--text-secondary)] mb-4">Confirm in wallet</p>
                                 <div className="text-2xl font-mono text-[var(--accent)]">
                                     {pendingPayment.cost} TCRO
                                 </div>
@@ -482,33 +527,34 @@ function CanvasContent() {
                             fitView
                             minZoom={0.3}
                             maxZoom={2}
-                            className="flex-1 bg-[var(--bg-primary)]"
+                            className="flex-1"
+                            proOptions={{ hideAttribution: true }}
                         >
-                            <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="rgba(255,255,255,0.03)" />
-                            <Controls className="!bg-[var(--bg-tertiary)] !border-[var(--border)] !rounded-xl !shadow-lg" />
+                            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.03)" />
+                            <Controls showInteractive={false} className="!bg-[var(--bg-tertiary)] !border-[var(--border)] !rounded-lg" />
                         </ReactFlow>
                     )}
 
                     {/* Chat View */}
                     {viewMode === 'chat' && (
-                        <div className="flex-1 flex flex-col overflow-hidden">
+                        <div className="flex-1 flex flex-col overflow-hidden pt-16">
                             <div className="flex-1 overflow-y-auto p-6 space-y-4">
                                 {chatMessages.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center text-center">
                                         <MessageSquare size={48} strokeWidth={1} className="text-[var(--text-tertiary)] mb-4" />
                                         <p className="text-[var(--text-secondary)] font-medium">Start a conversation</p>
-                                        <p className="text-sm text-[var(--text-tertiary)]">Ask your agents anything, pay per result.</p>
+                                        <p className="text-sm text-[var(--text-tertiary)]">Pay per result</p>
                                     </div>
                                 ) : (
                                     chatMessages.map(msg => (
                                         <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                             <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'user'
-                                                ? 'bg-[var(--accent)] text-white'
-                                                : msg.role === 'system'
-                                                    ? 'bg-[var(--error)] bg-opacity-20 text-[var(--error)] border border-[var(--error)]'
-                                                    : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)]'
+                                                    ? 'bg-[var(--accent)] text-white'
+                                                    : msg.role === 'system'
+                                                        ? 'bg-[var(--error)]/20 text-[var(--error)] border border-[var(--error)]'
+                                                        : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)]'
                                                 }`}>
-                                                <p className="text-sm">{msg.content}</p>
+                                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                                                 {msg.cost && (
                                                     <p className="text-xs mt-1 opacity-70 flex items-center gap-1">
                                                         <Zap size={10} /> {msg.cost.toFixed(4)} TCRO
@@ -523,12 +569,25 @@ function CanvasContent() {
                         </div>
                     )}
 
-                    {/* Prompt Bar (shared) */}
+                    {/* Empty State */}
+                    {viewMode === 'canvas' && !run && !isExecuting && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                            <div className="text-center">
+                                <div className="w-16 h-16 rounded-2xl bg-[var(--bg-tertiary)] flex items-center justify-center mx-auto mb-4">
+                                    <Layers size={28} strokeWidth={1.5} className="text-[var(--text-tertiary)]" />
+                                </div>
+                                <p className="text-[var(--text-secondary)] font-medium mb-1">No active workflow</p>
+                                <p className="text-sm text-[var(--text-tertiary)]">Enter a prompt to start</p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Prompt Bar */}
                     <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-secondary)]">
-                        <div className="max-w-3xl mx-auto flex gap-2">
+                        <div className="max-w-2xl mx-auto flex gap-3">
                             <input
-                                className="flex-1 input"
-                                placeholder={isConnected ? "Ask the agents..." : "Connect wallet to start..."}
+                                className="flex-1 input h-12"
+                                placeholder={isConnected ? "What would you like to do?" : "Connect wallet to start..."}
                                 value={prompt}
                                 onChange={e => setPrompt(e.target.value)}
                                 disabled={isExecuting || !isConnected}
@@ -537,8 +596,7 @@ function CanvasContent() {
                             <button
                                 onClick={handleRun}
                                 disabled={!isConnected || isExecuting || !prompt.trim()}
-                                className={`btn-primary flex items-center gap-2 ${(!isConnected || !prompt.trim()) && 'opacity-50 cursor-not-allowed'
-                                    }`}
+                                className="btn-primary h-12 px-6 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 {isExecuting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} fill="currentColor" />}
                                 Run
@@ -547,127 +605,61 @@ function CanvasContent() {
                         {!isConnected && (
                             <p className="text-center text-sm text-[var(--warning)] mt-2 flex items-center justify-center gap-2">
                                 <AlertTriangle size={14} />
-                                Connect wallet to Cronos Testnet for x402 payments (TCRO)
+                                Connect wallet to Cronos Testnet
                             </p>
                         )}
                     </div>
                 </div>
 
-                {/* Sidebar (A2UI Widgets) */}
+                {/* Sidebar (A2UI) */}
                 <aside
                     className={`
-                        fixed inset-y-0 right-0 z-40 w-full sm:w-80 lg:w-96 bg-[var(--bg-secondary)] border-l border-[var(--border)] shadow-2xl transition-transform duration-300 transform pt-20 lg:pt-24
-                        lg:relative lg:transform-none lg:shadow-none
+                        fixed inset-y-0 right-0 z-40 w-80 lg:w-96 bg-[var(--bg-secondary)] border-l border-[var(--border)]
+                        transition-transform duration-300 transform pt-16
+                        lg:relative lg:transform-none
                         ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
                     `}
                 >
-                    <div className="lg:hidden absolute top-20 left-0 right-0 h-14 flex items-center justify-between px-4 bg-[var(--bg-secondary)] border-b border-[var(--border)]">
-                        <h2 className="font-semibold text-[var(--text-primary)]">A2UI Widgets</h2>
-                        <button onClick={() => setIsSidebarOpen(false)} className="p-2 rounded-lg hover:bg-[var(--bg-hover)]">
-                            <X size={20} className="text-[var(--text-secondary)]" />
+                    <div className="h-14 flex items-center justify-between px-4 border-b border-[var(--border)]">
+                        <h2 className="font-semibold text-[var(--text-primary)]">A2UI</h2>
+                        <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 rounded-lg hover:bg-[var(--bg-hover)]">
+                            <X size={18} className="text-[var(--text-secondary)]" />
                         </button>
                     </div>
 
-                    <div className="h-full overflow-y-auto p-4 lg:p-6 lg:pt-6">
+                    <div className="h-[calc(100%-3.5rem)] overflow-y-auto p-4">
                         {a2uiMessages.length > 0 ? (
-                            <A2UIRenderer
-                                messages={a2uiMessages}
-                                onAction={async (payload) => {
-                                    console.log('A2UI User Action:', payload);
-                                    try {
-                                        await fetch('/api/action', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify(payload),
-                                        });
-                                    } catch (e) {
-                                        console.error('Failed to send action:', e);
-                                    }
-                                }}
-                            />
+                            <A2UIRenderer messages={a2uiMessages} onAction={handleA2UIAction} />
+                        ) : lastResult ? (
+                            // Show result text when no A2UI but we have a result
+                            <div className="p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                                <h3 className="font-semibold text-[var(--text-primary)] mb-2">Result</h3>
+                                <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{lastResult}</p>
+                            </div>
                         ) : (
-                            <div className="pt-10 text-center opacity-60">
-                                <Layers size={40} strokeWidth={1} className="mx-auto mb-4 text-[var(--text-tertiary)]" />
-                                <p className="text-sm text-[var(--text-tertiary)]">A2UI widgets will appear here</p>
+                            <div className="h-full flex flex-col items-center justify-center text-center">
+                                <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center mb-4">
+                                    <Layers size={24} strokeWidth={1.5} className="text-[var(--text-tertiary)]" />
+                                </div>
+                                <p className="text-sm text-[var(--text-tertiary)] max-w-[200px]">
+                                    Interactive widgets will appear here
+                                </p>
                             </div>
                         )}
                     </div>
                 </aside>
 
                 {/* Mobile Sidebar Toggle */}
-                <button
-                    className="lg:hidden fixed bottom-24 right-4 z-50 w-14 h-14 rounded-full bg-[var(--accent)] text-white shadow-lg flex items-center justify-center"
-                    onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-                >
-                    <Layers size={24} />
-                </button>
+                {(a2uiMessages.length > 0 || lastResult) && (
+                    <button
+                        className="lg:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-[var(--accent)] text-white shadow-lg flex items-center justify-center"
+                        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    >
+                        <Layers size={20} />
+                    </button>
+                )}
             </div>
         </div>
-    );
-}
-
-function WidgetCard({ widget }: { widget: A2UIWidget }) {
-    const icons: Record<string, React.ComponentType<{ size?: number }>> = {
-        event_card: Calendar,
-        reminder: Bell,
-        price_alert: TrendingUp,
-        search_result: Layers,
-        generic: Zap,
-    };
-    const Icon = icons[widget.type] || Zap;
-
-    return (
-        <Card className="bg-[var(--bg-tertiary)] border-[var(--border)]">
-            <CardHeader className="pb-2 pt-4 px-4 border-b border-[var(--border)] flex flex-row items-center gap-3 space-y-0">
-                <div className="w-10 h-10 rounded-xl bg-[var(--bg-elevated)] flex items-center justify-center shrink-0 text-[var(--accent)]">
-                    <Icon size={20} />
-                </div>
-                <CardTitle className="text-base font-semibold text-[var(--text-primary)]">{widget.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 py-4 space-y-2 text-[var(--text-secondary)]">
-                {widget.type === 'event_card' && (
-                    <>
-                        {widget.data.date && (
-                            <div className="flex justify-between text-sm">
-                                <span className="text-[var(--text-tertiary)]">Date</span>
-                                <span>{String(widget.data.date)}</span>
-                            </div>
-                        )}
-                        {widget.data.location && (
-                            <div className="flex justify-between text-sm">
-                                <span className="text-[var(--text-tertiary)]">Location</span>
-                                <span className="text-right">{String(widget.data.location)}</span>
-                            </div>
-                        )}
-                    </>
-                )}
-                {widget.type === 'price_alert' && (
-                    <div className="flex items-baseline justify-between">
-                        <span className="text-[var(--text-tertiary)]">Price</span>
-                        <span className="text-2xl font-bold text-[var(--text-primary)]">
-                            ${Number(widget.data.price || widget.data.currentPrice || 0).toFixed(4)}
-                        </span>
-                    </div>
-                )}
-                {widget.type === 'search_result' && (
-                    <>
-                        {widget.data.description && (
-                            <p className="text-sm text-[var(--text-secondary)]">{String(widget.data.description).slice(0, 150)}...</p>
-                        )}
-                        {widget.data.url && (
-                            <a href={String(widget.data.url)} target="_blank" rel="noopener noreferrer" className="text-sm text-[var(--accent)] hover:underline">
-                                View Source →
-                            </a>
-                        )}
-                    </>
-                )}
-                {widget.type === 'generic' && (
-                    <pre className="text-xs bg-[var(--bg-primary)] p-2 rounded overflow-auto max-h-40">
-                        {JSON.stringify(widget.data, null, 2)}
-                    </pre>
-                )}
-            </CardContent>
-        </Card>
     );
 }
 

@@ -106,5 +106,6 @@ export const MCP_SERVER_CONFIGS: Record<string, {
         args: ['-y', '@modelcontextprotocol/server-time'],
         envVars: [],
         tools: ['get_current_time', 'convert_time'],
-    }
+    },
+
 };
