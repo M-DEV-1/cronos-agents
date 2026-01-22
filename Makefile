@@ -65,9 +65,9 @@ adk-web:
 
 # Build all projects
 build:
-	cd agents/source && pnpm run build
-	cd agents/x402 && pnpm run build
-	cd client && pnpm run build
+	cd agents/source && pnpm install && pnpm run build
+	cd agents/x402 && pnpm install && pnpm run build
+	cd client && pnpm install && pnpm run build
 
 # TypeScript check (no emit)
 check:

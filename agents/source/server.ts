@@ -199,15 +199,15 @@ app.post('/tools/:toolName', async (req: Request, res: Response) => {
     const { toolName } = req.params;
     const { args, paymentHeader } = req.body;
 
-    // Find the tool wrapper
-    const tool = rootAgent.tools.find(t => t.name === toolName);
+    // Find the tool wrapper - tools are FunctionTool instances with name property
+    const tool = rootAgent.tools.find((t: any) => t.name === toolName);
     if (!tool) {
         return res.status(404).json({ error: 'Tool not found' });
     }
 
     try {
         // Execute with payment header if provided
-        const result = await (tool as any).execute(args, paymentHeader);
+        const result = await (tool as any).execute(args, { paymentHeader });
         res.json({ success: true, result });
     } catch (error: any) {
         // If it's a 402 error, return proper x402 response
