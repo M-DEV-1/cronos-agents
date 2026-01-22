@@ -199,9 +199,10 @@ rootAgent.tools = wrappers.map(wrapper => {
     return new FunctionTool({
         name: wrapper.name,
         description: wrapper.description,
-        // We can define parameters loosely or strictly. 
-        // For simplicity in this demo, letting LLM infer schema or using 'any'.
-        // In production, we'd copy the schema from the inner tool or define it.
-        execute: async (args) => wrapper.execute(args)
+        execute: async (args, context?: any) => {
+            // Extract payment header from context if available
+            const paymentHeader = context?.paymentHeader || context?.headers?.['x-payment'];
+            return wrapper.execute(args, paymentHeader);
+        }
     });
 });
