@@ -12,6 +12,7 @@ interface AgentNodeData {
     cost?: number;
     icon?: string;
     description?: string;
+    metadata?: Record<string, any>;
 }
 
 interface AgentNodeProps {
@@ -91,21 +92,51 @@ function AgentNode({ data, isConnectable }: AgentNodeProps) {
             {/* Content Area - Visible Description */}
             {data.description && (
                 <div style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.4', borderBottom: '1px solid var(--border)' }}>
-                    {data.description}
+                    {/* Try to parse if it looks like JSON object, otherwise show text */}
+                    {(() => {
+                        try {
+                            if (data.description?.trim().startsWith('{')) {
+                                const parsed = JSON.parse(data.description);
+                                return (
+                                    <div className="text-xs font-mono bg-black/20 p-2 rounded overflow-auto max-h-[100px]">
+                                        {Object.entries(parsed).map(([k, v]) => (
+                                            <div key={k}><span className="opacity-50">{k}:</span> {String(v)}</div>
+                                        ))}
+                                    </div>
+                                );
+                            }
+                        } catch { }
+                        return data.description;
+                    })()}
                 </div>
             )}
 
-            {/* Footer with Cost */}
+            {/* Footer with Cost / Link */}
             <div className="agent-node-footer">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <Zap size={14} fill={data.cost ? 'currentColor' : 'none'} />
                     <span style={{ fontWeight: 600 }}>
-                        {data.cost !== undefined ? `${data.cost.toFixed(4)} USDC` : 'FREE'}
+                        {data.cost !== undefined ? `${data.cost} TCRO` : 'FREE'}
                     </span>
                 </div>
-                <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-quaternary)' }}>
-                    ERC-8004
-                </div>
+                {/* Explorer Link if txHash is present in details or metadata */}
+                {data.metadata?.txHash && (
+                    <a
+                        href={`https://explorer.cronos.org/testnet/tx/${data.metadata.txHash}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="hover:text-[var(--accent)] hover:underline flex items-center gap-1"
+                        style={{ fontSize: '10px', letterSpacing: '0.5px', color: 'var(--text-tertiary)', textDecoration: 'none' }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        VIEW TX ↗
+                    </a>
+                )}
+                {!data.metadata?.txHash && (
+                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-quaternary)' }}>
+                        ERC-8004
+                    </div>
+                )}
             </div>
 
             <Handle

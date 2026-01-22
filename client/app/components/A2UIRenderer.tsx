@@ -92,15 +92,25 @@ function A2UIButton({ id, label, action, variant = 'primary', disabled, icon, da
     };
 
     const handleClick = () => {
-        if (action) {
-            // Handle open_url action
-            if (action.name === 'open_url' && action.payload?.url) {
-                window.open(action.payload.url as string, '_blank', 'noopener,noreferrer');
+        if (!action) return;
+
+        // Handle open_url action
+        if (action.name === 'open_url') {
+            let url: string | undefined;
+            if (typeof action.payload === 'string') {
+                url = action.payload;
+            } else if (action.payload && typeof action.payload === 'object' && 'url' in action.payload) {
+                // @ts-ignore
+                url = action.payload.url as string;
+            }
+
+            if (url) {
+                window.open(url, '_blank', 'noopener,noreferrer');
                 return;
             }
-            // For other actions, call onAction callback
-            onAction?.({ userAction: { action, componentId: id } });
         }
+        // For other actions, call onAction callback
+        onAction?.({ userAction: { action, componentId: id } });
     };
 
     return (
@@ -116,7 +126,7 @@ function A2UIButton({ id, label, action, variant = 'primary', disabled, icon, da
 
 function A2UICard({ child, title, subtitle, data, renderChild }: A2UICardProps & { data?: Record<string, unknown>; renderChild: (id: string) => React.ReactNode }) {
     return (
-        <Card className="bg-[var(--bg-tertiary)] border-[var(--border)]">
+        <Card className="bg-[var(--bg-tertiary)] border-[var(--border)] shadow-sm hover:shadow-md transition-all duration-200">
             {(title || subtitle) && (
                 <CardHeader className="pb-2">
                     {title && <CardTitle className="text-lg font-semibold text-[var(--text-primary)]">{resolveStringValue(title, data)}</CardTitle>}

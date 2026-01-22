@@ -4,7 +4,7 @@ import cors from 'cors';
 import { InMemoryRunner, isFinalResponse } from '@google/adk';
 import { rootAgent } from './agent.js';
 import { paymentEvents } from './pay-wrapper.js';
-import { extractA2UIFromResponse, wrapAsResultCard } from './a2ui-generator.js';
+import { extractA2UIFromResponse, wrapAsResultCard, cleanResponseText } from './a2ui-generator.js';
 import type { Express } from 'express';
 
 // Helper to create user content (avoiding @google/genai dependency)
@@ -80,7 +80,7 @@ app.post('/run', async (req: Request, res: Response) => {
         });
 
         // 3. Set up payment event listener
-        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: string }) => {
+        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: string; txHash?: string }) => {
             emit({
                 id: nextId(),
                 timestamp: Date.now(),
@@ -90,6 +90,7 @@ app.post('/run', async (req: Request, res: Response) => {
                 details: `${data.cost} TCRO for ${data.name}`,
                 cost: data.cost,
                 walletAddress: data.walletAddress,
+                metadata: data.txHash ? { txHash: data.txHash } : undefined
             });
         };
         paymentEvents.on('payment', paymentHandler);
@@ -145,12 +146,14 @@ app.post('/run', async (req: Request, res: Response) => {
         }
 
         // 7. Emit final response with A2UI
+        const cleanDetails = cleanResponseText(typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
+
         emit({
             id: nextId(),
             timestamp: Date.now(),
             type: 'final_response',
             label: 'Final Response',
-            details: typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult),
+            details: cleanDetails || 'Check the sidebar for interactive results.',
             result: finalResult,
             metadata: {
                 a2ui: a2uiMessages,
@@ -181,9 +184,17 @@ app.post('/confirm-payment', (req, res) => {
     console.log(`[x402] Received payment confirmation for ${toolName}, tx: ${txHash}`);
 
     // Emit event to release the blocked PaidToolWrapper
-    paymentEvents.emit('payment_confirmed', { name: toolName });
+    paymentEvents.emit('payment_confirmed', { name: toolName, txHash });
 
     res.json({ success: true });
+});
+
+// Handle A2UI User Actions
+app.post('/action', (req, res) => {
+    const { action, componentId } = req.body;
+    console.log(`[Server] Received User Action: ${action?.name} from ${componentId}`);
+    // TODO: Resume Agent execution
+    res.json({ status: 'received', action });
 });
 
 /**

@@ -20,8 +20,8 @@ import { Zap, Layers, X, Play, Calendar, Bell, TrendingUp, Grid3X3, MessageSquar
 import AgentNode from '../components/AgentNode';
 import { Navbar } from '../components/Navbar';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Button } from '../components/ui/button';
-import { useAccount, useSendTransaction } from 'wagmi';
+import { useAccount, useSendTransaction, useSwitchChain, useChainId } from 'wagmi';
+import { cronosTestnet } from 'wagmi/chains';
 import { parseEther } from 'viem';
 import { A2UIRenderer, parseA2UIStream } from '../components/A2UIRenderer';
 import type { A2UIMessage, A2UIComponent, A2UIUserAction } from '../types/a2ui';
@@ -150,6 +150,8 @@ function CanvasContent() {
 
     const { isConnected, address } = useAccount();
     const { sendTransactionAsync } = useSendTransaction();
+    const { switchChainAsync } = useSwitchChain();
+    const chainId = useChainId();
 
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -220,27 +222,38 @@ function CanvasContent() {
         if (!address) return false;
 
         try {
-            await sendTransactionAsync({
+            // Force switch to Cronos Testnet if on wrong chain
+            if (chainId !== cronosTestnet.id) {
+                try {
+                    await switchChainAsync({ chainId: cronosTestnet.id });
+                } catch (switchError) {
+                    console.error('Failed to switch network:', switchError);
+                    alert("Please switch your wallet to Cronos Testnet");
+                    return false;
+                }
+            }
+
+            const hash = await sendTransactionAsync({
                 to: walletAddress as `0x${string}`,
                 value: parseEther(cost.toString()),
             });
 
-            // Notify agent server that payment is complete
-            // This unblocks the tool execution
-            // We need to proxy through our Next.js API or call server directly if possible, 
-            // but since server is on port 4000, we can use a direct fetch for simplicity in this demo environment
-            // OR better: Create a Next.js proxy route for confirmation.
-            // For now, let's call the server directly since we're in dev mode on same machine.
-            // Actually, CORS might block. Let's assume the agent wrapper handles CORS or use /api/confirm proxy.
-
-            // NOTE: Ideally we should use the txHash from receipt, but sendTransactionAsync returns hash.
-            // But we need to wait for receipt to be sure? For UI responsiveness we send immediately.
-
-            await fetch('http://localhost:4000/confirm-payment', {
+            // Call confirmation proxy (avoids CORS)
+            await fetch('/api/confirm', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ toolName: toolName, txHash: '0x...' })
+                body: JSON.stringify({
+                    toolName: toolName,
+                    txHash: hash
+                })
             });
+
+            // Update local state if needed (e.g. to show link immediately)
+            // But usually the backend emits 'payment_success' with details soon.
+            // We can optimistic update here if desired, but let's rely on server event stream.
+
+            setTotalCost(prev => prev + cost);
+            return true;
 
             setTotalCost(prev => prev + cost);
             return true;
@@ -563,15 +576,22 @@ function CanvasContent() {
                     </div>
 
                     <div className="h-full overflow-y-auto p-4 lg:p-6 lg:pt-6">
-                        <h3 className="hidden lg:block text-sm font-medium text-[var(--text-tertiary)] uppercase tracking-wider mb-4">A2UI Widgets</h3>
                         {a2uiRootId && a2uiComponents.size > 0 ? (
                             <A2UIRenderer
                                 components={a2uiComponents}
                                 rootId={a2uiRootId}
                                 dataModel={a2uiDataModel}
-                                onAction={(action) => {
-                                    console.log('A2UI User Action:', action);
-                                    // TODO: Send userAction back to agent via API
+                                onAction={async (payload) => {
+                                    console.log('A2UI User Action:', payload);
+                                    try {
+                                        await fetch('/api/action', {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify(payload.userAction),
+                                        });
+                                    } catch (e) {
+                                        console.error('Failed to send action:', e);
+                                    }
                                 }}
                             />
                         ) : (

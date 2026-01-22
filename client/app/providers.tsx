@@ -6,7 +6,7 @@ import { WagmiProvider, createConfig, http } from 'wagmi';
 import { cronosTestnet } from 'wagmi/chains';
 import { metaMask, walletConnect, coinbaseWallet } from 'wagmi/connectors';
 
-const projectId = '3fcc6b760e911296e85e54c601004C88'; // Example project ID
+const projectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
 const queryClient = new QueryClient();
 
@@ -30,7 +30,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         setConfig(wagmiConfig);
     }, []);
 
-    if (!config) return null; // Avoid rendering until config is ready
+    if (!config) return null;
 
     return (
         <WagmiProvider config={config}>

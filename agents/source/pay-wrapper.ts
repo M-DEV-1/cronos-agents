@@ -93,17 +93,17 @@ export class PaidToolWrapper {
 
         try {
             // Create a promise that resolves when 'payment_confirmed' is emitted for this tool
-            await new Promise<void>((resolve, reject) => {
+            const txHash = await new Promise<string | void>((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     cleanup();
                     reject(new Error('Payment timeout - transaction not received in time'));
                 }, 300000); // 5 minute timeout
 
-                const onConfirmed = (data: { name: string }) => {
+                const onConfirmed = (data: { name: string; txHash?: string }) => {
                     if (data.name === this.name) {
                         console.log(`[x402] Payment confirmed for ${this.name}, resuming execution.`);
                         cleanup();
-                        resolve();
+                        resolve(data.txHash);
                     }
                 };
 
@@ -121,6 +121,7 @@ export class PaidToolWrapper {
                 cost: this.cost,
                 walletAddress: this.walletAddress,
                 status: 'success',
+                txHash: typeof txHash === 'string' ? txHash : undefined
             });
 
             // 5. Record "Completed" Transaction
