@@ -107,11 +107,11 @@ export const MCP_SERVER_CONFIGS: Record<string, {
         envVars: [],
         tools: ['get_current_time', 'convert_time'],
     },
-    // Crypto.com Market Data
-    cryptocom: {
+    // CoinGecko Market Data (Official)
+    coingecko: {
         command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-cryptocom-market-data'],
-        envVars: [],
-        tools: ['get_token_price', 'get_top_tokens', 'get_token_info'],
+        args: ['-y', '@coingecko/coingecko-mcp@latest'],
+        envVars: ['COINGECKO_API_KEY'],
+        tools: ['get_simple_price', 'get_coins_list', 'get_coins_markets'],
     }
 };

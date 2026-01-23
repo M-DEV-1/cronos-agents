@@ -610,5 +610,40 @@
     "currency": "TCRO",
     "status": "completed",
     "txHash": "0xa4452193c7064a57ee8194e174c350cf66f8d7c3241a6ef6e7026a846037f154"
+  },
+  {
+    "timestamp": "2026-01-23T11:07:11.392Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0x0d274728f16d47b7e2ab12a0fbf8b028b2ff14146606e339139a83ba326e17dc"
+  },
+  {
+    "timestamp": "2026-01-23T11:07:15.019Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-23T11:07:35.269Z",
+    "toolName": "get_crypto_price",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.01,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0x23af57e449675c1f709fffdf7a0c104b6751331c8a0dcbe69c8b2e08802e2237"
+  },
+  {
+    "timestamp": "2026-01-23T11:23:06.614Z",
+    "toolName": "find_events",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.02,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0x26b24ea937c01d51cc823cb988834007c6fdaaee215c93fe8736c464c7b4eb3d"
   }
 ]

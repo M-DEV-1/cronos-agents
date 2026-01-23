@@ -75,9 +75,24 @@ const cryptoTool = new PaidToolWrapper({
     cost: 0.01,
     walletAddress: WALLETS.CRYPTO,
     handler: async (args: { symbol: string }) => {
-        // Use Crypto.com MCP for real prices
+        // Use CoinGecko MCP for real prices
         try {
-            return await mcpManager.callTool('cryptocom', 'get_token_price', { symbol: args.symbol.toUpperCase() });
+            const symbol = args.symbol.toUpperCase();
+            const idMap: Record<string, string> = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'CRO': 'crypto-com-chain', // Cronos
+                'SOL': 'solana',
+                'USDC': 'usd-coin',
+                'USDT': 'tether'
+            };
+            const coinId = idMap[symbol] || symbol.toLowerCase();
+
+            return await mcpManager.callTool('coingecko', 'get_simple_price', {
+                ids: coinId,
+                vs_currencies: 'usd',
+                include_24hr_change: true
+            });
         } catch {
             // Fallback to search if MCP fails
             return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
@@ -163,7 +178,7 @@ ${A2UI_COMPONENT_SCHEMA}
 ## Paid Tools (x402)
 - 'web_search' (0.005 TCRO): General web search
 - 'github_search' (0.002 TCRO): Code/repo search
-- 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices (via Crypto.com MCP)
+- 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices (via CoinGecko MCP)
 - 'find_events' (0.02 TCRO): Events/conferences
 - 'calculator' (0.001 TCRO): Math calculations
 - 'get_weather' (0.003 TCRO): Weather information

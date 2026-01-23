@@ -224,8 +224,8 @@ app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-app.listen(PORT, () => {
-    console.log(`Agent server running on http://localhost:${PORT}`);
+app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`Agent server running on http://0.0.0.0:${PORT}`);
     console.log(`Using ADK InMemoryRunner with app: ${APP_NAME}`);
     if (process.env.AGENT_PRIVATE_KEY) console.log('✅ X402 payment handler configured');
 });

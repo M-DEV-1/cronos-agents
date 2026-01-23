@@ -36,8 +36,5 @@ RUN pnpm run build
 WORKDIR /app/agents/source
 RUN pnpm run build
 
-# Expose the server port
-EXPOSE 4000
-
 # Start the server
 CMD ["pnpm", "run", "server"]
