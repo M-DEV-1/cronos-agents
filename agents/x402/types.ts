@@ -25,7 +25,7 @@ export const FACILITATOR_URL = 'https://facilitator.cronoslabs.org/v2/x402';
 // Payment Requirements (returned in 402 response)
 export interface PaymentRequirements {
   scheme: 'exact' | 'range';
-  network: CronosNetwork;
+  network: 'cronos-testnet' | 'cronos-mainnet'; // Facilitator expects full network name
   payTo: string;
   asset: string;
   description: string;
@@ -58,7 +58,7 @@ export interface ToolWallet {
 export interface X402PaymentHeader {
   x402Version: number;
   scheme: string;
-  network: CronosNetwork;
+  network: 'cronos-testnet' | 'cronos-mainnet'; // Facilitator expects full network name
   payload: {
     from: string;
     to: string;

@@ -5,8 +5,9 @@ import { InMemoryRunner, isFinalResponse } from '@google/adk';
 import { rootAgent } from './agent.js';
 import { paymentEvents } from './pay-wrapper.js';
 import { extractA2UIFromResponse, wrapAsResultCard, cleanResponseText } from './a2ui-generator.js';
-import { executionStore, type ExecutionRun, type ExecutionStep, type StepKind } from './execution.js';
-import { planWithLLM } from './planner.js';
+// Import x402 handler
+import { createX402Handler } from '../x402/index.js';
+import type { X402Handler } from '../x402/index.js';
 import type { Express } from 'express';
 
 function createUserContent(text: string) {
@@ -22,16 +23,27 @@ const APP_NAME = 'source-agent';
 
 const runner = new InMemoryRunner({ agent: rootAgent, appName: APP_NAME });
 
-/**
- * SSE Event Emitter
- */
-interface SSEEvent {
-    type: string;
-    runId?: string;
-    stepId?: string;
-    steps?: ExecutionStep[];
-    result?: unknown;
-    a2ui?: unknown[];
+// X402 handler for client-side payment processing (lazy initialization)
+function getX402Handler(): X402Handler | null {
+    if (!process.env.AGENT_PRIVATE_KEY) {
+        return null;
+    }
+    try {
+        return createX402Handler('testnet');
+    } catch (err) {
+        console.warn('X402 handler not available:', err instanceof Error ? err.message : 'Unknown error');
+        return null;
+    }
+}
+
+// Event types for the frontend
+interface AgentEvent {
+    id: string;
+    timestamp: number;
+    type: 'user_input' | 'orchestrator' | 'payment_required' | 'payment_success' | 'payment_failed' | 'tool_call' | 'tool_result' | 'final_response' | 'error';
+    agentName?: string;
+    label: string;
+    details?: string;
     cost?: number;
     walletAddress?: string;
     toolName?: string;
@@ -151,10 +163,11 @@ app.post('/run', async (req: Request, res: Response) => {
                 timestamp: Date.now(),
                 id: `evt-${Date.now()}`,
                 agentName: data.name,
-                label: data.status === 'pending' ? 'Payment Required' :
-                    data.status === 'success' ? 'Payment Confirmed' : 'Payment Failed',
-                details: `${data.cost} TCRO for ${data.name}`,
-                metadata: data.txHash ? { txHash: data.txHash } : undefined,
+                label: data.status === 'pending' ? 'Payment Required' : data.status === 'success' ? 'Payment Confirmed' : 'Payment Failed',
+                details: `${data.cost} USDC for ${data.name}`,
+                cost: data.cost,
+                walletAddress: data.walletAddress,
+                metadata: data.txHash ? { txHash: data.txHash } : undefined
             });
 
             if (data.status === 'success') {
@@ -370,19 +383,61 @@ app.post('/run', async (req: Request, res: Response) => {
     res.end();
 });
 
-// Get run status
-app.get('/runs/:runId', (req, res) => {
-    const run = executionStore.get(req.params.runId);
-    if (!run) return res.status(404).json({ error: 'Run not found' });
-    res.json(run);
+// Endpoint to execute tool with x402 payment
+app.post('/tools/:toolName', async (req: Request, res: Response) => {
+    const { toolName } = req.params;
+    const { args, paymentHeader } = req.body;
+
+    // Find the tool wrapper - tools are FunctionTool instances with name property
+    const tool = rootAgent.tools.find((t: any) => t.name === toolName);
+    if (!tool) {
+        return res.status(404).json({ error: 'Tool not found' });
+    }
+
+    try {
+        // Execute with payment header if provided
+        const result = await (tool as any).execute(args, { paymentHeader });
+        res.json({ success: true, result });
+    } catch (error: any) {
+        // If it's a 402 error, return proper x402 response
+        if (error.status === 402) {
+            return res.status(402).json(error);
+        }
+        res.status(500).json({ error: error.message });
+    }
 });
 
-// Payment confirmation
-app.post('/confirm-payment', (req, res) => {
-    const { toolName, txHash } = req.body;
-    console.log(`[x402] Payment confirmed: ${toolName}, tx: ${txHash}`);
-    paymentEvents.emit('payment_confirmed', { name: toolName, txHash });
-    res.json({ success: true });
+// Endpoint for client to execute tool with automatic x402 payment
+app.post('/tools/:toolName/execute', async (req: Request, res: Response) => {
+    const { toolName } = req.params;
+    const { args } = req.body;
+
+    const x402Handler = getX402Handler();
+    if (!x402Handler) {
+        return res.status(500).json({ error: 'X402 handler not configured (AGENT_PRIVATE_KEY required)' });
+    }
+
+    const toolUrl = `http://localhost:${PORT}/tools/${toolName}`;
+
+    try {
+        // Use x402 handler's executeWithPayment which handles 402 automatically
+        const result = await x402Handler.executeWithPayment(toolUrl, { args });
+
+        if (result.status === 'error') {
+            return res.status(500).json({ error: result.error });
+        }
+
+        res.json({
+            success: true,
+            result: result.data,
+            paid: result.paid,
+            cost: result.cost,
+            txHash: result.txHash,
+            x402Receipt: result.x402Receipt
+        });
+    } catch (error: any) {
+        res.status(500).json({ error: error.message });
+    }
 });
 
 // A2UI actions - resume execution
@@ -407,7 +462,13 @@ app.get('/health', (req: Request, res: Response) => {
 
 app.listen(PORT, () => {
     console.log(`Agent server running on http://localhost:${PORT}`);
-    console.log(`Using LLM-based planning with ADK event derivation`);
+    console.log(`Using ADK InMemoryRunner with app: ${APP_NAME}`);
+    if (!process.env.AGENT_PRIVATE_KEY) {
+        console.warn('⚠️  AGENT_PRIVATE_KEY not set - x402 payment verification disabled');
+        console.warn('   Set AGENT_PRIVATE_KEY in .env to enable real x402 payments');
+    } else {
+        console.log('✅ X402 payment handler configured');
+    }
 });
 
 export default app;

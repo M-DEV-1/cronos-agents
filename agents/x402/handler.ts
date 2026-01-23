@@ -99,10 +99,13 @@ export class X402Handler {
         // Sign using EIP-712
         const signature = await this.wallet.signTypedData(domain, types, message);
 
+        // Convert internal network name to facilitator format for payment header
+        const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
+
         const paymentHeader: X402PaymentHeader = {
             x402Version: 1,
             scheme: 'exact',
-            network: this.network,
+            network: facilitatorNetwork,
             payload: {
                 from: this.wallet.address,
                 to: payTo,
@@ -133,9 +136,12 @@ export class X402Handler {
 
         const amount = Math.floor(price * 1e6).toString(); // Convert to 6 decimals (USDC)
 
+        // Convert internal network name to facilitator format
+        const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
+
         return {
             scheme: 'exact',
-            network: this.network,
+            network: facilitatorNetwork,
             payTo: toolWallet.walletAddress,
             asset: this.networkConfig.usdcContract,
             description: `Payment for ${toolName}`,
@@ -158,11 +164,21 @@ export class X402Handler {
             paymentRequirements,
         };
 
-        const response = await axios.post(`${this.facilitatorUrl}/verify`, payload, {
-            headers: { 'X402-Version': '1' },
-        });
+        try {
+            const response = await axios.post(`${this.facilitatorUrl}/verify`, payload, {
+                headers: { 'X402-Version': '1' },
+            });
 
-        return response.data;
+            return response.data;
+        } catch (error: any) {
+            console.error('[x402] Verify payment error:', {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                message: error.message,
+            });
+            throw error;
+        }
     }
 
     /**
@@ -187,15 +203,25 @@ export class X402Handler {
             paymentRequirements,
         };
 
-        const response = await axios.post(`${this.facilitatorUrl}/settle`, payload, {
-            headers: { 'X402-Version': '1' },
-        });
+        try {
+            const response = await axios.post(`${this.facilitatorUrl}/settle`, payload, {
+                headers: { 'X402-Version': '1' },
+            });
 
-        if (response.data.event !== 'payment.settled') {
-            throw new Error(`Settlement failed: ${response.data.error || 'Unknown error'}`);
+            if (response.data.event !== 'payment.settled') {
+                throw new Error(`Settlement failed: ${response.data.error || 'Unknown error'}`);
+            }
+
+            return response.data;
+        } catch (error: any) {
+            console.error('[x402] Settle payment error:', {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                message: error.message,
+            });
+            throw error;
         }
-
-        return response.data;
     }
 
     /**

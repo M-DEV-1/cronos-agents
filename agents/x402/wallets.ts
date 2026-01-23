@@ -210,7 +210,8 @@ export function getToolPrice(toolName: string, tier: string = 'default'): number
     const wallet = TOOL_WALLETS[toolName];
     if (!wallet) return 0;
 
-    const pricingTier = wallet.pricing[tier] || wallet.pricing.default;
+    // Try requested tier, then default, then first available tier
+    const pricingTier = wallet.pricing[tier] || wallet.pricing.default || Object.values(wallet.pricing)[0];
     return pricingTier?.price || 0;
 }
 
