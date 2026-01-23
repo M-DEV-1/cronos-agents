@@ -2,17 +2,20 @@
 
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Bot, Zap, CheckCircle, Database, Loader2, Search, Github, Coins, Calendar, Calculator, AlertCircle, FileText, Globe } from 'lucide-react';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from './ui/card';
+import { Bot, Zap, CheckCircle, Database, Loader2, Search, Github, Coins, Calendar, Calculator, AlertCircle, FileText, Globe, MessageSquare } from 'lucide-react';
+import { Card } from './ui/card';
 
 interface AgentNodeData {
     label: string;
-    kind: StepKind;
-    status: StepStatus;
+    type: string;
+    status: 'running' | 'complete' | 'error' | 'idle';
+    subtitle?: string;
     description?: string;
     toolName?: string;
     cost?: number;
     mcpServer?: string;
+    metadata?: Record<string, unknown>;
+    icon?: string;
 }
 
 interface AgentNodeProps {
@@ -24,7 +27,7 @@ const icons: Record<string, any> = {
     orchestrator: Bot,
     tool_call: Zap,
     final_response: CheckCircle,
-    user_input: MessageSquareIcon,
+    user_input: MessageSquare,
     error: AlertCircle,
     brave_web_search: Search,
     google_search: Search,
@@ -36,25 +39,6 @@ const icons: Record<string, any> = {
     read_file: FileText,
     get_weather: Globe
 };
-
-function MessageSquareIcon(props: any) {
-    return (
-        <svg
-            {...props}
-            xmlns="http://www.w3.org/2000/svg"
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-        >
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-    )
-}
 
 function AgentNode({ data, isConnectable }: AgentNodeProps) {
     const iconName = data.icon || data.type;

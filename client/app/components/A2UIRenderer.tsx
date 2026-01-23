@@ -1,11 +1,10 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { v0_9 } from '@a2ui-sdk/react';
+import { A2UIProvider, A2UIRenderer as SDKRenderer } from '@a2ui-sdk/react/0.9';
+import { standardCatalog } from '@a2ui-sdk/react/0.9/standard-catalog';
 import { Loader2 } from 'lucide-react';
 import { A2UIMessage } from '../types/a2ui';
-
-const { A2UIProvider, A2UIRenderer: SDKRenderer } = v0_9;
 
 interface A2UIRendererProps {
     messages: A2UIMessage[];
@@ -23,8 +22,12 @@ export default function A2UIRenderer({ messages, onAction }: A2UIRendererProps) 
         setMounted(true);
     }, []);
 
+    // Debug logging
+    console.log('[A2UIRenderer] Render with messages:', messages?.length);
+
     // If no messages, render nothing (sidebar handles empty state)
     if (!messages || messages.length === 0) {
+        console.log('[A2UIRenderer] No messages to render');
         return null;
     }
 
@@ -38,7 +41,7 @@ export default function A2UIRenderer({ messages, onAction }: A2UIRendererProps) 
 
     // Render using the A2UI SDK
     return (
-        <A2UIProvider messages={messages}>
+        <A2UIProvider messages={messages} catalog={standardCatalog}>
             <div className="a2ui-container space-y-4">
                 <SDKRenderer onAction={onAction} />
             </div>

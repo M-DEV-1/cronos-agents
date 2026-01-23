@@ -113,6 +113,25 @@ function CanvasContent() {
     const [sidebarWidth, setSidebarWidth] = useState(380);
     const [isResizing, setIsResizing] = useState(false);
 
+    // DEBUG: Inject test message to verify SDK
+    /*
+    useEffect(() => {
+        const testMsg: any = {
+            surfaceUpdate: {
+                components: [{
+                    id: "test_root",
+                    component: { Card: { title: { literalString: "SDK Test" }, child: "test_text" } }
+                }, {
+                    id: "test_text",
+                    component: { Text: { text: { literalString: "If you can see this, A2UI SDK is working." } } }
+                }]
+            }
+        };
+        const beginMsg: any = { beginRendering: { root: "test_root" } };
+        setA2UIMessages([testMsg, beginMsg]);
+    }, []);
+    */
+
     const executionRef = useRef(0);
     const abortControllerRef = useRef<AbortController | null>(null);
     const chatEndRef = useRef<HTMLDivElement>(null);
@@ -142,7 +161,7 @@ function CanvasContent() {
                 status: ev.type === 'error' ? 'error' :
                     ev.type === 'final_response' ? 'complete' :
                         (ev.id === filteredEvents[filteredEvents.length - 1].id && executionStatus === 'running' ? 'running' : 'complete'),
-                description: ev.details,
+                description: ev.details && ev.details.length > 300 ? ev.details.slice(0, 300) + '...' : ev.details,
                 cost: ev.cost,
             }
         }));
@@ -277,11 +296,15 @@ function CanvasContent() {
                                         trimmed.includes('"beginRendering"')
                                     )) {
                                         try {
+                                            console.log('[Extract] Found potential A2UI line:', trimmed.slice(0, 50));
                                             const parsed = JSON.parse(trimmed);
                                             messages.push(parsed);
-                                        } catch (e) { /* ignore invalid JSON */ }
+                                        } catch (e) {
+                                            console.warn('[Extract] A2UI Parse Error:', e);
+                                        }
                                     }
                                 }
+                                console.log('[Extract] Total messages parsed:', messages.length);
                             }
 
                             if (messages.length > 0) {
