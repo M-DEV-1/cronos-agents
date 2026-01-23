@@ -4,9 +4,6 @@ import cors from 'cors';
 import { InMemoryRunner, isFinalResponse } from '@google/adk';
 import { rootAgent } from './agent.js';
 import { paymentEvents } from './pay-wrapper.js';
-import { extractA2UIFromResponse, wrapAsResultCard, cleanResponseText } from './a2ui-generator.js';
-import type { A2UIMessage } from './a2ui-universal.js';
-// Import x402 handler
 import { createX402Handler } from '../x402/handler.js';
 import type { X402Handler } from '../x402/index.js';
 import type { Express } from 'express';
@@ -14,44 +11,6 @@ import type { Express } from 'express';
 // Helper to create user content (avoiding @google/genai dependency)
 function createUserContent(text: string) {
     return { role: 'user' as const, parts: [{ text }] };
-}
-
-/**
- * Basic A2UI extraction from LLM response
- * (Replaces old a2ui-generator logic)
- */
-function extractA2UIFromResponse(response: string | unknown): unknown[] {
-    if (typeof response === 'object' && response !== null) return [response];
-    if (typeof response !== 'string') return [];
-
-    const messages: unknown[] = [];
-    // Basic regex to find JSON objects that look like A2UI commands
-    const lines = response.split('\n');
-    for (const line of lines) {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('{') && (
-            trimmed.includes('surfaceUpdate') ||
-            trimmed.includes('dataModelUpdate') ||
-            trimmed.includes('beginRendering')
-        )) {
-            try {
-                const parsed = JSON.parse(trimmed);
-                messages.push(parsed);
-            } catch (e) { /* ignore invalid JSON */ }
-        }
-    }
-    return messages;
-}
-
-function cleanResponseText(response: string | unknown): string {
-    if (typeof response !== 'string') return '';
-    return response.split('\n')
-        .filter(line => !line.trim().startsWith('{') || (
-            !line.includes('surfaceUpdate') &&
-            !line.includes('dataModelUpdate') &&
-            !line.includes('beginRendering')
-        ))
-        .join('\n').trim();
 }
 
 const app: Express = express();
@@ -146,12 +105,8 @@ app.post('/run', async (req: Request, res: Response) => {
         };
         paymentEvents.on('payment', paymentHandler);
 
-        // 4. Track tool calls and their results for A2UI generation
-        let lastToolName = '';
-        let lastToolResult: unknown = null;
-
+        // 4. Track tool calls
         const toolHandler = (data: { name: string; args: unknown }) => {
-            lastToolName = data.name;
             emit({
                 id: nextId(),
                 timestamp: Date.now(),
@@ -163,14 +118,7 @@ app.post('/run', async (req: Request, res: Response) => {
         };
         paymentEvents.on('tool_call', toolHandler);
 
-        // 4b. Capture tool results for A2UI generation
-        const toolResultHandler = (data: { name: string; result: unknown }) => {
-            lastToolName = data.name;
-            lastToolResult = data.result;
-        };
-        paymentEvents.on('tool_result', toolResultHandler);
-
-        // 5. Run the agent using InMemoryRunner
+        // 5. Run the agent
         let finalResult: unknown = null;
 
         for await (const event of runner.runAsync({
@@ -178,7 +126,6 @@ app.post('/run', async (req: Request, res: Response) => {
             sessionId,
             newMessage: createUserContent(prompt),
         })) {
-            // Emit intermediate events as orchestrator updates
             if (event.actions?.stateDelta) {
                 emit({
                     id: nextId(),
@@ -189,47 +136,20 @@ app.post('/run', async (req: Request, res: Response) => {
                 });
             }
 
-            // Check for final response
             if (isFinalResponse(event)) {
                 const content = event.content?.parts?.map(p => p.text ?? '').join('') ?? '';
                 finalResult = content || event;
             }
         }
 
-        // 6. Generate A2UI - prioritize programmatic generation from tool results
-        const { generateA2UI, mergeA2UI } = await import('./a2ui-universal.js');
-
-        let a2uiMessages: unknown[] = [];
-
-        // First: try to generate A2UI from tool results (most reliable)
-        if (lastToolResult && lastToolName) {
-            a2uiMessages = generateA2UI(lastToolName, lastToolResult);
-        }
-
-        // Second: extract any A2UI from LLM response and merge
-        if (finalResult) {
-            const llmA2UI = extractA2UIFromResponse(finalResult) as A2UIMessage[];
-            if (llmA2UI.length > 0) {
-                a2uiMessages = mergeA2UI(llmA2UI, a2uiMessages as A2UIMessage[]);
-            } else if (a2uiMessages.length === 0) {
-                // Fallback: wrap as result card
-                a2uiMessages = wrapAsResultCard('Result', finalResult);
-            }
-        }
-
-        // 7. Emit final response with A2UI
-        const cleanDetails = cleanResponseText(typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
-
+        // 6. Emit final response (Raw text/JSON) - Client handles A2UI extraction
         emit({
             id: nextId(),
             timestamp: Date.now(),
             type: 'final_response',
             label: 'Final Response',
-            details: cleanDetails || 'Check the sidebar for interactive results.',
+            details: typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult),
             result: finalResult,
-            metadata: {
-                a2ui: a2uiMessages,
-            },
         });
 
         // Clean up listeners
@@ -294,17 +214,12 @@ app.post('/tools/:toolName/execute', async (req: Request, res: Response) => {
     }
 });
 
-// Handle A2UI User Actions
 app.post('/action', (req, res) => {
     const { action, componentId } = req.body;
     console.log(`[Server] Received User Action: ${action?.name} from ${componentId}`);
-    // TODO: Resume Agent execution
     res.json({ status: 'received', action });
 });
 
-/**
- * Health check endpoint
- */
 app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });
