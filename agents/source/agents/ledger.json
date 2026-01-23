@@ -663,5 +663,23 @@
     "currency": "TCRO",
     "status": "completed",
     "txHash": "0x8651f9ac5d668e88c04fdec05823a32b907c2b7509ff4083ded5e66700446dce"
+  },
+  {
+    "timestamp": "2026-01-23T11:42:27.012Z",
+    "toolName": "get_crypto_price",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.01,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0xa8de49c98debeb2d747288c3bc67e5e08be53810fc504af246862b5335cc04ba"
+  },
+  {
+    "timestamp": "2026-01-23T11:43:40.522Z",
+    "toolName": "get_crypto_price",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.01,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0xc6c5cae8d45b912095cc01d7363782d0df999b9062469289052e76c8e2bee13f"
   }
 ]

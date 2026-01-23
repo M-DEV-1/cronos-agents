@@ -376,3 +376,10 @@ h3 {
     background-position: -200% 0;
   }
 }
+
+/* A2UI Container */
+.a2ui-container {
+  width: 100%;
+  min-height: 200px;
+  color: var(--text-primary);
+}

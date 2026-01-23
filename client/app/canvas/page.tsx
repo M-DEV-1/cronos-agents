@@ -332,9 +332,9 @@ function CanvasContent() {
                 }]);
                 setExecutionStatus('completed');
 
-                // HARDCODED OVERRIDE: Inject Mock A2UI for demonstration
-                // as requested by user ("A2UI isn't working... hardcode for JSON-data inferred UI")
+                console.log('[Debug] Scheduling A2UI Mock Injection...');
                 setTimeout(() => {
+                    console.log('[Debug] Injecting MOCK_A2UI_PAYLOAD:', MOCK_A2UI_PAYLOAD.length, 'items');
                     setA2UIMessages(MOCK_A2UI_PAYLOAD as any);
                 }, 500);
             }

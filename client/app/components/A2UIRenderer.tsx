@@ -23,7 +23,7 @@ export default function A2UIRenderer({ messages, onAction }: A2UIRendererProps) 
     }, []);
 
     // Debug logging
-    console.log('[A2UIRenderer] Render with messages:', messages?.length);
+    console.log('[A2UIRenderer] Render with messages:', messages?.length, messages);
 
     // If no messages, render nothing (sidebar handles empty state)
     if (!messages || messages.length === 0) {

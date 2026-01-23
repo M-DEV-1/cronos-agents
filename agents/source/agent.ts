@@ -19,7 +19,6 @@ const WALLETS = {
     CALCULATOR: process.env.WALLET_CALCULATOR || '0x87C45698081B7F3ae524435da0d80735513eA5DA',
 };
 
-// --- MCP Tools Wrapped in PaidToolWrapper ---
 
 const searchTool = new PaidToolWrapper({
     name: 'web_search',
