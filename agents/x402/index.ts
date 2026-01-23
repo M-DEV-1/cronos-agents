@@ -7,6 +7,7 @@
 export {
     CRONOS_CONFIG,
     FACILITATOR_URL,
+    NATIVE_TOKEN_ADDRESS,
     type CronosNetwork,
     type PaymentRequirements,
     type PricingTier,

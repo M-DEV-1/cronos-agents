@@ -355,5 +355,31 @@
     "currency": "USDT",
     "status": "completed",
     "txHash": "0xea8cd0aeb321227b15dc20c7e0cb489e9171c5d5bfae6a011458c4e00106bd82"
+  },
+  {
+    "timestamp": "2026-01-23T08:08:19.698Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0x607235ab24b399b241090ca747f80e000c797abcfac9649459c2ccc5340b3599"
+  },
+  {
+    "timestamp": "2026-01-23T08:08:20.845Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "failed"
+  },
+  {
+    "timestamp": "2026-01-23T08:08:29.654Z",
+    "toolName": "github_search",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.002,
+    "currency": "TCRO",
+    "status": "completed",
+    "txHash": "0xe13941ade536109893d88cb87270832b4e7886ff523091ae66d1f2f9045ffe67"
   }
 ]

@@ -1,6 +1,6 @@
 /**
  * X402 Payment Handler
- * Handles x402 payments using Cronos facilitator and EIP-3009 signatures
+ * Handles x402 payments using native TCRO transfers on Cronos Testnet
  */
 
 import { ethers } from 'ethers';
@@ -13,11 +13,13 @@ import {
     CRONOS_CONFIG,
     FACILITATOR_URL,
     CronosNetwork,
+    NATIVE_TOKEN_ADDRESS,
 } from './types.js';
 import { getToolWallet, getToolPrice } from './wallets.js';
 
 /**
- * X402 Handler for Cronos payments
+ * X402 Handler for Cronos native token (TCRO/CRO) payments
+ * Uses direct wallet transfers instead of EIP-3009 for native tokens
  */
 export class X402Handler {
     private wallet: ethers.Wallet;
@@ -51,56 +53,39 @@ export class X402Handler {
     }
 
     /**
-     * Generate a random nonce for EIP-3009
+     * Get the native token balance
+     */
+    async getBalance(): Promise<string> {
+        const balance = await this.wallet.provider!.getBalance(this.wallet.address);
+        return ethers.formatEther(balance);
+    }
+
+    /**
+     * Generate a random nonce for tracking
      */
     private generateNonce(): string {
         return ethers.hexlify(ethers.randomBytes(32));
     }
 
     /**
-     * Create EIP-3009 payment header for x402
+     * Create payment header for native token transfer
+     * For native tokens, this is a simpler structure than EIP-3009
      */
     async createPaymentHeader(paymentRequirements: PaymentRequirements): Promise<string> {
-        const { payTo, asset, maxAmountRequired, maxTimeoutSeconds } = paymentRequirements;
+        const { payTo, maxAmountRequired, maxTimeoutSeconds } = paymentRequirements;
 
         const nonce = this.generateNonce();
-        const validAfter = 0;
         const validBefore = Math.floor(Date.now() / 1000) + maxTimeoutSeconds;
 
-        // EIP-712 domain for USDC token on Cronos
-        const domain = {
-            name: 'Bridged USDC (Stargate)',
-            version: '1',
-            chainId: this.networkConfig.chainId,
-            verifyingContract: asset,
-        };
-
-        // EIP-712 typed data for TransferWithAuthorization
-        const types = {
-            TransferWithAuthorization: [
-                { name: 'from', type: 'address' },
-                { name: 'to', type: 'address' },
-                { name: 'value', type: 'uint256' },
-                { name: 'validAfter', type: 'uint256' },
-                { name: 'validBefore', type: 'uint256' },
-                { name: 'nonce', type: 'bytes32' },
-            ],
-        };
-
-        const message = {
-            from: this.wallet.address,
-            to: payTo,
-            value: maxAmountRequired,
-            validAfter,
-            validBefore,
-            nonce,
-        };
-
-        // Sign using EIP-712
-        const signature = await this.wallet.signTypedData(domain, types, message);
-
-        // Convert internal network name to facilitator format for payment header
+        // Convert internal network name to facilitator format
         const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
+
+        // For native tokens, we sign a simple message instead of EIP-712
+        const message = ethers.solidityPackedKeccak256(
+            ['address', 'address', 'uint256', 'uint256', 'bytes32'],
+            [this.wallet.address, payTo, maxAmountRequired, validBefore, nonce]
+        );
+        const signature = await this.wallet.signMessage(ethers.getBytes(message));
 
         const paymentHeader: X402PaymentHeader = {
             x402Version: 1,
@@ -110,11 +95,11 @@ export class X402Handler {
                 from: this.wallet.address,
                 to: payTo,
                 value: maxAmountRequired,
-                validAfter,
+                validAfter: 0,
                 validBefore,
                 nonce,
                 signature,
-                asset,
+                asset: NATIVE_TOKEN_ADDRESS, // Native token
             },
         };
 
@@ -122,7 +107,7 @@ export class X402Handler {
     }
 
     /**
-     * Create payment requirements for a tool
+     * Create payment requirements for a tool using native TCRO
      */
     createPaymentRequirements(
         toolName: string,
@@ -134,7 +119,8 @@ export class X402Handler {
         const price = getToolPrice(toolName, priceTier);
         if (price === 0) return null; // Free tool
 
-        const amount = Math.floor(price * 1e6).toString(); // Convert to 6 decimals (USDC)
+        // Convert to wei (18 decimals for native TCRO)
+        const amount = ethers.parseEther(price.toString()).toString();
 
         // Convert internal network name to facilitator format
         const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
@@ -143,7 +129,7 @@ export class X402Handler {
             scheme: 'exact',
             network: facilitatorNetwork,
             payTo: toolWallet.walletAddress,
-            asset: this.networkConfig.usdcContract,
+            asset: NATIVE_TOKEN_ADDRESS, // Native TCRO
             description: `Payment for ${toolName}`,
             mimeType: 'application/json',
             maxAmountRequired: amount,
@@ -152,37 +138,80 @@ export class X402Handler {
     }
 
     /**
-     * Verify payment with facilitator
+     * Execute native token transfer directly (bypasses facilitator)
+     * This is the core payment method for TCRO
+     */
+    async sendNativePayment(
+        to: string,
+        amountWei: string
+    ): Promise<{ txHash: string; from: string; to: string; value: string; blockNumber?: number }> {
+        console.log(`[x402] Sending ${ethers.formatEther(amountWei)} TCRO to ${to}...`);
+
+        const tx = await this.wallet.sendTransaction({
+            to,
+            value: amountWei,
+        });
+
+        console.log(`[x402] Transaction sent: ${tx.hash}`);
+        const receipt = await tx.wait();
+        console.log(`[x402] Transaction confirmed in block ${receipt?.blockNumber}`);
+
+        return {
+            txHash: tx.hash,
+            from: this.wallet.address,
+            to,
+            value: amountWei,
+            blockNumber: receipt?.blockNumber,
+        };
+    }
+
+    /**
+     * Verify payment header (for receiving payments)
+     * For native tokens, we may skip facilitator verification
      */
     async verifyPayment(
         paymentHeader: string,
         paymentRequirements: PaymentRequirements
     ): Promise<{ isValid: boolean; invalidReason?: string }> {
-        const payload = {
-            x402Version: 1,
-            paymentHeader,
-            paymentRequirements,
-        };
-
         try {
-            const response = await axios.post(`${this.facilitatorUrl}/verify`, payload, {
-                headers: { 'X402-Version': '1' },
-            });
+            // Decode the payment header
+            const decoded = JSON.parse(Buffer.from(paymentHeader, 'base64').toString()) as X402PaymentHeader;
 
-            return response.data;
+            // Basic validation
+            if (decoded.payload.to !== paymentRequirements.payTo) {
+                return { isValid: false, invalidReason: 'Recipient mismatch' };
+            }
+
+            if (BigInt(decoded.payload.value) < BigInt(paymentRequirements.maxAmountRequired)) {
+                return { isValid: false, invalidReason: 'Insufficient payment amount' };
+            }
+
+            // For native tokens, verify the signature
+            const message = ethers.solidityPackedKeccak256(
+                ['address', 'address', 'uint256', 'uint256', 'bytes32'],
+                [decoded.payload.from, decoded.payload.to, decoded.payload.value, decoded.payload.validBefore, decoded.payload.nonce]
+            );
+
+            const recoveredAddress = ethers.verifyMessage(ethers.getBytes(message), decoded.payload.signature);
+
+            if (recoveredAddress.toLowerCase() !== decoded.payload.from.toLowerCase()) {
+                return { isValid: false, invalidReason: 'Invalid signature' };
+            }
+
+            // Check expiry
+            if (decoded.payload.validBefore < Math.floor(Date.now() / 1000)) {
+                return { isValid: false, invalidReason: 'Payment authorization expired' };
+            }
+
+            return { isValid: true };
         } catch (error: any) {
-            console.error('[x402] Verify payment error:', {
-                status: error.response?.status,
-                statusText: error.response?.statusText,
-                data: error.response?.data,
-                message: error.message,
-            });
-            throw error;
+            console.error('[x402] Verify payment error:', error.message);
+            return { isValid: false, invalidReason: error.message };
         }
     }
 
     /**
-     * Settle payment with facilitator
+     * Settle payment - for native tokens, this executes the actual transfer
      */
     async settlePayment(
         paymentHeader: string,
@@ -197,30 +226,28 @@ export class X402Handler {
         blockNumber?: number;
         timestamp?: string;
     }> {
-        const payload = {
-            x402Version: 1,
-            paymentHeader,
-            paymentRequirements,
-        };
-
         try {
-            const response = await axios.post(`${this.facilitatorUrl}/settle`, payload, {
-                headers: { 'X402-Version': '1' },
-            });
+            // For native TCRO, execute direct transfer
+            const result = await this.sendNativePayment(
+                paymentRequirements.payTo,
+                paymentRequirements.maxAmountRequired
+            );
 
-            if (response.data.event !== 'payment.settled') {
-                throw new Error(`Settlement failed: ${response.data.error || 'Unknown error'}`);
-            }
-
-            return response.data;
+            return {
+                event: 'payment.settled',
+                txHash: result.txHash,
+                settlementId: `settle-${Date.now()}-${result.txHash.slice(0, 8)}`,
+                value: result.value,
+                from: result.from,
+                to: result.to,
+                blockNumber: result.blockNumber,
+                timestamp: new Date().toISOString(),
+            };
         } catch (error: any) {
             console.error('[x402] Settle payment error:', {
-                status: error.response?.status,
-                statusText: error.response?.statusText,
-                data: error.response?.data,
                 message: error.message,
             });
-            throw error;
+            throw new Error(`Settlement failed: ${error.message}`);
         }
     }
 
@@ -268,7 +295,7 @@ export class X402Handler {
                     const paymentRequirements = response.data.paymentRequirements as PaymentRequirements;
 
                     // Skip payment if free
-                    if (parseInt(paymentRequirements.maxAmountRequired) === 0) {
+                    if (BigInt(paymentRequirements.maxAmountRequired) === 0n) {
                         const retryResponse = await axios.post(url, requestBody, {
                             headers: {
                                 'X402-Version': '1',
@@ -295,7 +322,8 @@ export class X402Handler {
                         },
                     });
 
-                    const cost = parseInt(paymentRequirements.maxAmountRequired) / 1e6;
+                    // Cost in TCRO (18 decimals)
+                    const cost = parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired));
 
                     return {
                         status: 'success',
