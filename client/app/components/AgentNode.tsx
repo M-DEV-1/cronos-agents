@@ -2,24 +2,8 @@
 
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import {
-    Brain,
-    Wrench,
-    Clock,
-    Layout,
-    CheckCircle,
-    Loader2,
-    AlertCircle,
-    Zap,
-    Search,
-    Github,
-    Coins,
-    Calendar,
-    Cloud,
-    Folder,
-    Calculator
-} from 'lucide-react';
-import type { StepKind, StepStatus } from '../types/execution';
+import { Bot, Zap, CheckCircle, Database, Loader2, Search, Github, Coins, Calendar, Calculator, AlertCircle, FileText, Globe } from 'lucide-react';
+import { Card, CardHeader, CardTitle, CardContent, CardFooter } from './ui/card';
 
 interface AgentNodeData {
     label: string;
@@ -36,134 +20,156 @@ interface AgentNodeProps {
     isConnectable: boolean;
 }
 
-// Kind-based icon mapping
-const kindIcons: Record<StepKind, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
-    intent: Brain,
-    tool: Wrench,
-    wait: Clock,
-    ui: Layout,
-};
-
-// Tool-specific icon mapping
-const toolIcons: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
-    web_search: Search,
+const icons: Record<string, any> = {
+    orchestrator: Bot,
+    tool_call: Zap,
+    final_response: CheckCircle,
+    user_input: MessageSquareIcon,
+    error: AlertCircle,
+    brave_web_search: Search,
+    google_search: Search,
     github_search: Github,
     get_crypto_price: Coins,
     find_events: Calendar,
-    get_weather: Cloud,
-    list_directory: Folder,
     calculator: Calculator,
+    list_directory: FileText,
+    read_file: FileText,
+    get_weather: Globe
 };
 
-// Kind-based accent colors
-const kindColors: Record<StepKind, string> = {
-    intent: '#3B8A8C',      // Teal (accent)
-    tool: '#8B5CF6',        // Purple
-    wait: '#F59E0B',        // Amber
-    ui: '#EC4899',          // Pink
-};
-
-// Status-based styling
-const statusStyles: Record<StepStatus, { borderColor: string; glow: boolean; icon: React.ComponentType<{ size?: number; className?: string }> | null }> = {
-    planned: { borderColor: 'var(--border)', glow: false, icon: null },
-    running: { borderColor: '#3B8A8C', glow: true, icon: Loader2 },
-    completed: { borderColor: '#22C55E', glow: false, icon: CheckCircle },
-    failed: { borderColor: '#EF4444', glow: false, icon: AlertCircle },
-};
+function MessageSquareIcon(props: any) {
+    return (
+        <svg
+            {...props}
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+    )
+}
 
 function AgentNode({ data, isConnectable }: AgentNodeProps) {
-    const kindColor = kindColors[data.kind];
-    const statusStyle = statusStyles[data.status];
+    const iconName = data.icon || data.type;
+    const Icon = icons[iconName] || icons[data.subtitle?.toLowerCase().replace(/ /g, '_') || ''] || Bot;
 
-    // Get icon: prefer tool-specific, fall back to kind-based
-    const Icon = (data.toolName && toolIcons[data.toolName]) || kindIcons[data.kind];
-    const StatusIcon = statusStyle.icon;
+    // Status visual logic
+    const isRunning = data.status === 'running';
+    const isComplete = data.status === 'complete';
+    const isError = data.status === 'error';
+
+    // Status Colors
+    const statusColor = isRunning ? 'var(--accent)' :
+        isComplete ? 'var(--success)' :
+            isError ? 'var(--error)' : 'var(--text-tertiary)';
+
+    const borderColor = isRunning ? 'var(--accent)' : 'var(--border)';
+    const glow = isRunning ? '0 0 20px -5px var(--accent-glow)' : 'none';
 
     return (
-        <div
-            className="agent-node"
-            data-kind={data.kind}
-            data-status={data.status}
-            style={{
-                borderColor: statusStyle.borderColor,
-                boxShadow: statusStyle.glow ? `0 0 20px ${kindColor}40` : undefined,
-            }}
-        >
+        <div className="relative group">
             <Handle
                 type="target"
                 position={Position.Left}
                 isConnectable={isConnectable}
+                className="!bg-[var(--text-secondary)] !w-3 !h-3 !border-2 !border-[var(--bg-primary)] transition-all group-hover:!bg-[var(--accent)]"
+                style={{ left: -6 }}
+            />
+
+            <Card
+                className="w-[280px] overflow-hidden transition-all duration-300 bg-[var(--bg-secondary)]"
                 style={{
-                    background: kindColor,
-                    width: 10,
-                    height: 10,
-                    left: -5,
-                    border: '2px solid var(--bg-primary)'
+                    borderColor,
+                    boxShadow: glow
                 }}
-            />
-
-            {/* Left accent bar */}
-            <div
-                className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
-                style={{ background: kindColor }}
-            />
-
-            {/* Header */}
-            <div className="agent-node-header">
-                <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
-                    style={{
-                        background: `${kindColor}15`,
-                        color: kindColor,
-                    }}
-                >
-                    <Icon size={20} strokeWidth={1.5} />
-                </div>
-                <div className="flex-1 min-w-0">
-                    <div className="agent-node-title truncate">{data.label}</div>
-                    <div className="agent-node-subtitle">
-                        {data.kind.toUpperCase()}
-                        {data.mcpServer && ` • ${data.mcpServer}`}
+            >
+                {/* Header */}
+                <div className="flex items-center gap-3 p-3 border-b border-[var(--border)] bg-[var(--bg-tertiary)]/50">
+                    <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 border border-[var(--border)] bg-[var(--bg-primary)]"
+                        style={{ color: statusColor }}
+                    >
+                        <Icon size={20} strokeWidth={1.5} className={isRunning ? 'animate-pulse' : ''} />
                     </div>
+
+                    <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-sm text-[var(--text-primary)] truncate" title={data.label}>
+                            {data.label}
+                        </div>
+                        <div className="text-xs text-[var(--text-tertiary)] truncate font-mono uppercase tracking-wider">
+                            {data.subtitle || data.type}
+                        </div>
+                    </div>
+
+                    {isRunning && <Loader2 size={16} className="animate-spin text-[var(--accent)] shrink-0" />}
+                    {isError && <AlertCircle size={16} className="text-[var(--error)] shrink-0" />}
+                    {/* {isComplete && <CheckCircle size={16} className="text-[var(--success)] shrink-0 opacity-50" />} */}
                 </div>
-                {StatusIcon && (
-                    <div style={{ color: statusStyle.borderColor }}>
-                        <StatusIcon
-                            size={18}
-                            className={data.status === 'running' ? 'animate-spin' : ''}
-                        />
+
+                {/* Content */}
+                {data.description && (
+                    <div className="p-3 text-xs text-[var(--text-secondary)] leading-relaxed max-h-[120px] overflow-y-auto custom-scrollbar border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+                        {(() => {
+                            try {
+                                if (data.description?.trim().startsWith('{')) {
+                                    const parsed = JSON.parse(data.description);
+                                    return (
+                                        <div className="space-y-1 font-mono">
+                                            {Object.entries(parsed).map(([k, v]) => (
+                                                <div key={k} className="flex gap-2">
+                                                    <span className="text-[var(--text-tertiary)] shrink-0">{k}:</span>
+                                                    <span className="text-[var(--text-primary)] break-all">{String(v).slice(0, 100)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                }
+                            } catch { }
+                            return data.description;
+                        })()}
                     </div>
                 )}
-            </div>
 
-            {/* Footer with cost */}
-            <div className="agent-node-footer">
-                <div className="flex items-center gap-1.5">
-                    <Zap
-                        size={12}
-                        fill={data.cost ? 'currentColor' : 'none'}
-                        style={{ color: data.cost ? 'var(--warning)' : 'var(--text-quaternary)' }}
-                    />
-                    <span className={data.cost ? 'text-[var(--warning)]' : ''}>
-                        {data.cost ? `${data.cost} TCRO` : 'FREE'}
-                    </span>
+                {/* Footer */}
+                <div className="px-3 py-2 flex items-center justify-between bg-[var(--bg-tertiary)]/30">
+                    <div className="flex items-center gap-1.5 text-xs font-medium">
+                        <Zap size={12} fill={data.cost ? 'currentColor' : 'none'} className={data.cost ? 'text-[var(--warning)]' : 'text-[var(--text-tertiary)]'} />
+                        <span className={data.cost ? 'text-[var(--text-primary)]' : 'text-[var(--text-tertiary)]'}>
+                            {data.cost !== undefined ? `${data.cost} TCRO` : 'FREE'}
+                        </span>
+                    </div>
+
+                    {data.metadata?.txHash ? (
+                        <a
+                            href={`https://explorer.cronos.org/testnet/tx/${data.metadata.txHash}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-[10px] uppercase tracking-wider font-medium text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
+                            onClick={(e) => e.stopPropagation()}
+                        >
+                            View TX ↗
+                        </a>
+                    ) : (
+                        <span className="text-[10px] uppercase tracking-wider font-medium text-[var(--text-quaternary)]">
+                            ERC-8004
+                        </span>
+                    )}
                 </div>
-                <div className="text-[10px] uppercase tracking-wider text-[var(--text-quaternary)]">
-                    {data.status}
-                </div>
-            </div>
+            </Card>
 
             <Handle
                 type="source"
                 position={Position.Right}
                 isConnectable={isConnectable}
-                style={{
-                    background: kindColor,
-                    width: 10,
-                    height: 10,
-                    right: -5,
-                    border: '2px solid var(--bg-primary)'
-                }}
+                className="!bg-[var(--text-secondary)] !w-3 !h-3 !border-2 !border-[var(--bg-primary)] transition-all group-hover:!bg-[var(--accent)]"
+                style={{ right: -6 }}
             />
         </div>
     );

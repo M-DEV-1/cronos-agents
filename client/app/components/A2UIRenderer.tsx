@@ -1,32 +1,29 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { A2UIProvider, A2UIRenderer as SDKRenderer } from '@a2ui-sdk/react/0.9';
+import React from 'react';
+import { v0_9 } from '@a2ui-sdk/react';
+
+const { A2UIProvider, A2UIRenderer: SDKRenderer } = v0_9;
+import { Card, CardContent } from './ui/card';
+import { AlertTriangle, Loader2 } from 'lucide-react';
+
 import { A2UIMessage } from '../types/a2ui';
 import { Loader2 } from 'lucide-react';
 
 interface A2UIRendererProps {
     messages: A2UIMessage[];
-    onAction?: (action: unknown) => void;
-    isLoading?: boolean;
+    onAction?: (payload: unknown) => void;
 }
 
 /**
- * A2UI Renderer - renders real A2UI components from the SDK
- * No fallbacks - uses actual A2UI SDK rendering
+ * Renders A2UI messages using the official @a2ui-sdk/react library.
+ * Wraps the SDK renderer in the required provider.
  */
-export default function A2UIRenderer({ messages, onAction, isLoading }: A2UIRendererProps) {
-    const [mounted, setMounted] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        setMounted(true);
-    }, []);
-
-    const handleAction = (payload: unknown) => {
-        console.log('[A2UI] Action triggered:', payload);
-        if (onAction) onAction(payload);
-    };
+export default function A2UIRenderer({ messages, onAction }: A2UIRendererProps) {
+    // If no messages, render nothing (sidebar handles empty state)
+    if (!messages || messages.length === 0) {
+        return null;
+    }
 
     if (!mounted) {
         return (
@@ -64,8 +61,8 @@ export default function A2UIRenderer({ messages, onAction, isLoading }: A2UIRend
     // Render using the A2UI SDK
     return (
         <A2UIProvider messages={messages}>
-            <div className="a2ui-root w-full">
-                <SDKRenderer onAction={handleAction} />
+            <div className="a2ui-container space-y-4">
+                <SDKRenderer onAction={onAction} />
             </div>
         </A2UIProvider>
     );

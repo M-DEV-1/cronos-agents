@@ -220,6 +220,9 @@ export class PaidToolWrapper {
                     paymentEvents.emit('tool_call', { name: this.name, args });
                     const result = await this.handler(args);
 
+                    // Emit tool result for A2UI generation
+                    paymentEvents.emit('tool_result', { name: this.name, result });
+
                     return {
                         ...result,
                         _x402: {
@@ -336,6 +339,9 @@ export class PaidToolWrapper {
 
             // Execute tool
             const result = await this.handler(args);
+
+            // Emit tool result for A2UI generation
+            paymentEvents.emit('tool_result', { name: this.name, result });
 
             // Return with X402 receipt
             return {

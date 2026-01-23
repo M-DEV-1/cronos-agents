@@ -107,5 +107,11 @@ export const MCP_SERVER_CONFIGS: Record<string, {
         envVars: [],
         tools: ['get_current_time', 'convert_time'],
     },
-
+    // Crypto.com Market Data
+    cryptocom: {
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-cryptocom-market-data'],
+        envVars: [],
+        tools: ['get_token_price', 'get_top_tokens', 'get_token_info'],
+    }
 };

@@ -3,9 +3,10 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Send, Zap, Shield, Eye, ArrowRight, Bot, Coins, Globe } from 'lucide-react';
+import { ArrowRight, Zap, Bot, Coins, Eye, Globe, Shield, Sparkles, ChevronRight } from 'lucide-react';
 import { Navbar } from './components/Navbar';
 import { Button } from './components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from './components/ui/card';
 
 export default function Home() {
   const [prompt, setPrompt] = useState('');
@@ -15,105 +16,126 @@ export default function Home() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isLoading) return;
-
     setIsLoading(true);
     router.push(`/canvas?prompt=${encodeURIComponent(prompt)}`);
   };
 
+  const examples = [
+    { query: "What's the current price of BTC?", icon: Coins },
+    { query: "Find upcoming tech conferences in 2026", icon: Globe },
+    { query: "Search GitHub for AI agent frameworks", icon: Bot },
+  ];
+
   const features = [
     {
       icon: Bot,
-      title: 'Multi-Agent Orchestration',
-      description: 'ADK-powered agents collaborate to complete complex tasks with full event tracing.',
+      title: 'Intelligent Orchestration',
+      description: 'ADK-powered agents collaborate seamlessly, with full observability into every decision.',
     },
     {
       icon: Coins,
-      title: 'x402 Micro-Payments',
-      description: 'Pay-per-call economics on Cronos blockchain. Every tool invocation is metered.',
+      title: 'Micropayment Economics',
+      description: 'x402 protocol enables pay-per-call pricing. Every tool invocation is metered on Cronos.',
     },
     {
       icon: Eye,
-      title: 'Real-Time Event Canvas',
-      description: 'Visualize every agent action, tool call, and payment as interactive nodes.',
+      title: 'Visual Workflow Canvas',
+      description: 'Watch your agents work in real-time with an interactive node-based execution view.',
     },
     {
-      icon: Globe,
-      title: 'MCP Tool Connectors',
-      description: 'Connect to GitHub, Filesystem, Search, and more via Model Context Protocol.',
+      icon: Sparkles,
+      title: 'A2UI: Generative Interface',
+      description: 'Agents dynamically build interactive UIs tailored to your request and results.',
     },
   ];
 
-  const examples = [
-    'Find upcoming literature festivals in India',
-    'What is the price of CRO?',
-    'Search GitHub for Rust web frameworks',
+  const stats = [
+    { value: '50+', label: 'MCP Tools' },
+    { value: '<2s', label: 'Avg Response' },
+    { value: '0.01', label: 'TCRO/Call' },
   ];
 
   return (
-    <main className="min-h-screen bg-[var(--bg-primary)]">
+    <main className="min-h-screen bg-[var(--bg-primary)] overflow-x-hidden">
       <Navbar />
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-8">
-            <div className="w-2 h-2 rounded-full bg-[var(--success)] animate-pulse" />
-            <span className="text-sm text-[var(--text-secondary)]">
-              Powered by Cronos & ERC-8004
-            </span>
+      <section className="relative pt-24 pb-16 md:pt-32 md:pb-24 px-4 sm:px-6">
+        {/* Background gradient */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-gradient-radial from-[var(--accent)]/10 via-transparent to-transparent blur-3xl opacity-60" />
+        </div>
+
+        <div className="relative max-w-5xl mx-auto">
+          {/* Status Badge */}
+          <div className="flex justify-center mb-8">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-secondary)] border border-[var(--border)]">
+              <div className="w-1.5 h-1.5 rounded-full bg-[var(--success)] animate-pulse" />
+              <span className="text-xs font-medium text-[var(--text-secondary)]">
+                Live on Cronos Testnet
+              </span>
+            </div>
           </div>
 
           {/* Headline */}
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight mb-6 leading-[1.1]">
-            <span className="text-[var(--text-primary)]">x402-enabled</span>
-            <br />
-            <span className="bg-gradient-to-r from-[var(--accent)] via-teal-400 to-cyan-400 bg-clip-text text-transparent">
-              AI Agents
-            </span>
-          </h1>
+          <div className="text-center mb-8">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight leading-[1.1] mb-4">
+              <span className="text-[var(--text-primary)]">The Future of</span>
+              <br />
+              <span className="bg-gradient-to-r from-[var(--accent)] via-teal-400 to-cyan-400 bg-clip-text text-transparent">
+                AI Agent Commerce
+              </span>
+            </h1>
+            <p className="text-base sm:text-lg md:text-xl text-[var(--text-secondary)] max-w-2xl mx-auto leading-relaxed">
+              Visual multi-agent workflows with real-time observability and
+              micropayments. Pay for what you use, see what you're paying for.
+            </p>
+          </div>
 
-          {/* Subheadline */}
-          <p className="text-lg md:text-xl text-[var(--text-secondary)] max-w-2xl mx-auto mb-10">
-            Orchestrated multi-agent workflows with real-time event tracing and
-            pay-per-request micro-payments on Cronos blockchain.
-          </p>
+          {/* Stats */}
+          <div className="flex justify-center gap-8 md:gap-16 mb-10">
+            {stats.map((stat) => (
+              <div key={stat.label} className="text-center">
+                <div className="text-2xl md:text-3xl font-bold text-[var(--text-primary)]">{stat.value}</div>
+                <div className="text-xs md:text-sm text-[var(--text-tertiary)] uppercase tracking-wider">{stat.label}</div>
+              </div>
+            ))}
+          </div>
 
           {/* Prompt Input */}
-          <form onSubmit={handleSubmit} className="max-w-xl mx-auto mb-8">
-            <div className="relative">
+          <form onSubmit={handleSubmit} className="max-w-2xl mx-auto mb-6">
+            <div className="relative group">
               <input
                 type="text"
-                placeholder="What would you like to do?"
+                placeholder="Ask the agents anything..."
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 disabled={isLoading}
-                className="input w-full h-14 pl-5 pr-14 rounded-2xl text-base"
+                className="w-full h-14 md:h-16 pl-5 pr-14 rounded-2xl text-base md:text-lg bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20 transition-all"
                 autoFocus
               />
-              <button
+              <Button
                 type="submit"
                 disabled={!prompt.trim() || isLoading}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-10 h-10 rounded-xl flex items-center justify-center transition-all"
-                style={{
-                  background: prompt.trim() ? 'var(--accent)' : 'var(--bg-tertiary)',
-                  opacity: prompt.trim() ? 1 : 0.5,
-                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 h-10 md:h-12 px-4 md:px-6 rounded-xl bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
-                <Send className="w-4 h-4 text-white" />
-              </button>
+                <span className="hidden md:inline mr-2">Run</span>
+                <ArrowRight className="w-4 h-4" />
+              </Button>
             </div>
           </form>
 
-          {/* Example Prompts */}
+          {/* Example Queries */}
           <div className="flex flex-wrap justify-center gap-2">
-            {examples.map((example, i) => (
+            {examples.map((example) => (
               <button
-                key={i}
-                onClick={() => setPrompt(example)}
-                className="px-4 py-2 rounded-full text-sm transition-all bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-tertiary)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]"
+                key={example.query}
+                onClick={() => setPrompt(example.query)}
+                className="group flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-tertiary)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] transition-all"
               >
-                {example}
+                <example.icon size={14} className="text-[var(--accent)] opacity-60 group-hover:opacity-100" />
+                <span className="hidden sm:inline">{example.query}</span>
+                <span className="sm:hidden">{example.query.slice(0, 25)}...</span>
               </button>
             ))}
           </div>
@@ -121,94 +143,106 @@ export default function Home() {
       </section>
 
       {/* Features Section */}
-      <section className="py-20 px-6 border-t border-[var(--border)]">
+      <section className="py-16 md:py-24 px-4 sm:px-6 border-t border-[var(--border)]">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-bold mb-4 text-[var(--text-primary)]">
-              Full Agent Lifecycle
+          <div className="text-center mb-12 md:mb-16">
+            <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold mb-3 text-[var(--text-primary)]">
+              Built for Serious Work
             </h2>
-            <p className="text-[var(--text-secondary)] max-w-xl mx-auto">
-              Observability + Pay-per-request economics + Rich UI — all in one platform.
+            <p className="text-[var(--text-secondary)] max-w-xl mx-auto text-sm md:text-base">
+              Not another chatbot. A complete platform for building, running,
+              and monetizing AI agent workflows.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {features.map((feature, i) => (
-              <div
-                key={i}
-                className="card-glass p-6 group hover:border-[var(--border-strong)] transition-all"
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            {features.map((feature) => (
+              <Card
+                key={feature.title}
+                className="group bg-[var(--bg-secondary)] border-[var(--border)] hover:border-[var(--border-strong)] transition-all"
               >
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center shrink-0 group-hover:bg-[var(--accent)] transition-colors">
-                    <feature.icon className="w-6 h-6 text-[var(--accent)] group-hover:text-white transition-colors" />
+                <CardHeader className="flex flex-row items-start gap-4 pb-2">
+                  <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center shrink-0 group-hover:bg-[var(--accent)]/10 transition-colors">
+                    <feature.icon className="w-5 h-5 md:w-6 md:h-6 text-[var(--accent)]" />
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-2">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base md:text-lg text-[var(--text-primary)]">
                       {feature.title}
-                    </h3>
-                    <p className="text-[var(--text-secondary)] text-sm leading-relaxed">
+                    </CardTitle>
+                    <CardDescription className="text-sm text-[var(--text-secondary)] leading-relaxed">
                       {feature.description}
-                    </p>
+                    </CardDescription>
                   </div>
-                </div>
-              </div>
+                </CardHeader>
+              </Card>
             ))}
           </div>
         </div>
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 px-6 border-t border-[var(--border)]">
-        <div className="max-w-3xl mx-auto text-center">
-          <div className="card-glass p-10 md:p-14">
-            <Zap className="w-12 h-12 text-[var(--accent)] mx-auto mb-6" />
-            <h2 className="text-2xl md:text-3xl font-bold mb-4 text-[var(--text-primary)]">
-              Ready to get started?
-            </h2>
-            <p className="text-[var(--text-secondary)] mb-8 max-w-md mx-auto">
-              Connect your wallet and start running pay-per-request AI agents on Cronos Testnet.
-            </p>
-            <Button
-              onClick={() => router.push('/canvas')}
-              className="btn-primary inline-flex items-center gap-2 text-base px-8 py-3"
-            >
-              Open Canvas
-              <ArrowRight className="w-4 h-4" />
-            </Button>
-          </div>
+      <section className="py-16 md:py-24 px-4 sm:px-6 border-t border-[var(--border)]">
+        <div className="max-w-3xl mx-auto">
+          <Card className="bg-gradient-to-br from-[var(--bg-secondary)] to-[var(--bg-tertiary)] border-[var(--border)] overflow-hidden">
+            <CardContent className="p-8 md:p-12 text-center relative">
+              {/* Subtle glow */}
+              <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/5 to-transparent pointer-events-none" />
+
+              <div className="relative">
+                <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-[var(--accent)]/10 flex items-center justify-center mx-auto mb-6">
+                  <Zap className="w-7 h-7 md:w-8 md:h-8 text-[var(--accent)]" />
+                </div>
+
+                <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-3 text-[var(--text-primary)]">
+                  Ready to Build?
+                </h2>
+                <p className="text-[var(--text-secondary)] mb-8 max-w-md mx-auto text-sm md:text-base">
+                  Connect your wallet and start running pay-per-request AI workflows
+                  on Cronos Testnet. No subscription, no commitment.
+                </p>
+
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                  <Button
+                    onClick={() => router.push('/canvas')}
+                    className="w-full sm:w-auto bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white px-8 py-3 text-base font-medium"
+                  >
+                    Launch Canvas
+                    <ChevronRight className="ml-2 w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => router.push('/ledger')}
+                    className="w-full sm:w-auto border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] px-6 py-3"
+                  >
+                    View Ledger
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-10 px-6 border-t border-[var(--border)]">
+      <footer className="py-8 md:py-10 px-4 sm:px-6 border-t border-[var(--border)]">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[var(--accent)] to-teal-600 flex items-center justify-center">
               <Zap className="w-4 h-4 text-white" fill="currentColor" />
             </div>
-            <span className="text-[var(--text-secondary)] text-sm">
+            <span className="text-sm text-[var(--text-secondary)]">
               © 2026 Agents of Truth
             </span>
           </div>
 
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-4 md:gap-6">
             <span className="text-xs uppercase tracking-wider text-[var(--text-quaternary)]">
               Powered by
             </span>
-            <Image
-              src="/cronos-logo.svg"
-              alt="Cronos"
-              width={80}
-              height={24}
-              style={{ opacity: 0.6 }}
-            />
-            <Image
-              src="/x402-logo.png"
-              alt="x402"
-              width={48}
-              height={20}
-              style={{ opacity: 0.6 }}
-            />
+            <div className="flex items-center gap-4 opacity-50 hover:opacity-70 transition-opacity">
+              <Image src="/cronos-logo.svg" alt="Cronos" width={72} height={20} />
+              <Image src="/x402-logo.png" alt="x402" width={40} height={16} />
+            </div>
           </div>
         </div>
       </footer>

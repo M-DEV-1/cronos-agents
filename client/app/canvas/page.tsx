@@ -15,27 +15,55 @@ import {
     ReactFlowProvider,
 } from '@xyflow/react';
 import dagre from 'dagre';
-import { Zap, Layers, X, Play, Calendar, Bell, TrendingUp, Grid3X3, MessageSquare, AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
+import {
+    Zap, Layers, X, Play, Grid3X3, MessageSquare,
+    AlertTriangle, Loader2, Sparkles, GripVertical,
+    CheckCircle2, XCircle, Clock, ArrowRight
+} from 'lucide-react';
 import AgentNode from '../components/AgentNode';
 import { Navbar } from '../components/Navbar';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
 import { useAccount } from 'wagmi';
 import A2UIRenderer from '../components/A2UIRenderer';
 import type { A2UIMessage } from '../types/a2ui';
-import type { ExecutionRun, ExecutionStep, StepStatus } from '../types/execution';
+
+// --- TYPES ---
+type EventType = 'user_input' | 'orchestrator' | 'payment_required' | 'payment_success' | 'payment_failed' | 'tool_call' | 'tool_result' | 'final_response' | 'error';
+
+interface AgentEvent {
+    id: string;
+    timestamp: number;
+    type: EventType;
+    agentName?: string;
+    label: string;
+    details?: string;
+    cost?: number;
+    walletAddress?: string;
+    result?: unknown;
+    metadata?: Record<string, unknown>;
+}
+
+interface ChatMessage {
+    id: string;
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+    timestamp: number;
+    cost?: number;
+}
 
 const nodeTypes = { agent: AgentNode };
 
 // --- DAGRE LAYOUT ---
-const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => {
+const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'LR') => {
     if (nodes.length === 0) return { nodes: [], edges: [] };
 
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    dagreGraph.setGraph({ rankdir: direction, nodesep: 40, ranksep: 80 });
+    dagreGraph.setGraph({ rankdir: direction, nodesep: 60, ranksep: 100 });
 
     nodes.forEach((node) => {
-        dagreGraph.setNode(node.id, { width: 260, height: 90 });
+        dagreGraph.setNode(node.id, { width: 240, height: 100 });
     });
 
     edges.forEach((edge) => {
@@ -49,8 +77,8 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
         return {
             ...node,
             position: {
-                x: nodeWithPosition.x - 130,
-                y: nodeWithPosition.y - 45,
+                x: nodeWithPosition.x - 120,
+                y: nodeWithPosition.y - 50,
             },
         };
     });
@@ -58,50 +86,35 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[], direction = 'TB') => 
     return { nodes: layoutedNodes, edges };
 };
 
-// Chat message type
-interface ChatMessage {
-    id: string;
-    role: 'user' | 'assistant' | 'system';
-    content: string;
-    timestamp: number;
-    cost?: number;
-}
+// --- EXECUTION STATUS ---
+type ExecutionStatus = 'idle' | 'running' | 'completed' | 'error';
 
 function CanvasContent() {
     const searchParams = useSearchParams();
     const promptParam = searchParams.get('prompt') || '';
-
     const { isConnected, address } = useAccount();
+    const reactFlowInstance = useReactFlow();
 
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
-    const reactFlowInstance = useReactFlow();
 
     // View mode - canvas or chat
     const [viewMode, setViewMode] = useState<'canvas' | 'chat'>('canvas');
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
-    const chatEndRef = useRef<HTMLDivElement>(null);
+    const [viewMode, setViewMode] = useState<'canvas' | 'chat'>('canvas');
 
-    // Execution state
-    const [run, setRun] = useState<ExecutionRun | null>(null);
-    const [isExecuting, setIsExecuting] = useState(false);
+    const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>('idle');
     const [prompt, setPrompt] = useState(promptParam);
-    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [totalCost, setTotalCost] = useState(0);
-    const [pendingPayment, setPendingPayment] = useState<{ cost: number; walletAddress: string; toolName: string } | null>(null);
 
     // A2UI State - store raw result for display
     const [a2uiMessages, setA2UIMessages] = useState<A2UIMessage[]>([]);
-    const [lastResult, setLastResult] = useState<string | null>(null);
+    const [sidebarWidth, setSidebarWidth] = useState(380);
+    const [isResizing, setIsResizing] = useState(false);
 
     const abortControllerRef = useRef<AbortController | null>(null);
 
-    // Scroll chat to bottom
-    useEffect(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [chatMessages]);
-
-    // Map ExecutionSteps to React Flow nodes
+    // Event to Node Mapper - only meaningful events
     useEffect(() => {
         if (!run || run.steps.length === 0) {
             setNodes([]);
@@ -109,81 +122,92 @@ function CanvasContent() {
             return;
         }
 
-        const rawNodes: Node[] = run.steps.map((step) => ({
-            id: step.stepId,
+        // Only show semantic nodes
+        const meaningfulTypes = ['user_input', 'tool_call', 'payment_success', 'final_response', 'error'];
+        const filteredEvents = events.filter(ev => meaningfulTypes.includes(ev.type));
+
+        if (filteredEvents.length === 0) return;
+
+        const rawNodes: Node[] = filteredEvents.map((ev) => ({
+            id: ev.id,
             type: 'agent',
             position: { x: 0, y: 0 },
             data: {
-                label: step.label,
-                kind: step.kind,
-                status: step.status,
-                description: step.description,
-                toolName: step.toolName,
-                mcpServer: step.mcpServer,
-                cost: step.cost,
+                label: ev.label,
+                subtitle: ev.agentName || ev.type.replace(/_/g, ' ').toUpperCase(),
+                type: ev.type,
+                status: ev.type === 'error' ? 'error' :
+                    ev.type === 'final_response' ? 'complete' :
+                        (ev.id === filteredEvents[filteredEvents.length - 1].id && executionStatus === 'running' ? 'running' : 'complete'),
+                description: ev.details,
+                cost: ev.cost,
             }
         }));
 
-        const rawEdges: Edge[] = run.steps.slice(0, -1).map((step, index) => ({
+        const rawEdges: Edge[] = filteredEvents.slice(0, -1).map((ev, index) => ({
             id: `edge-${index}`,
-            source: step.stepId,
-            target: run.steps[index + 1].stepId,
-            animated: run.steps[index + 1].status === 'running',
-            style: {
-                stroke: run.steps[index + 1].status === 'running' ? '#3B8A8C' : 'var(--text-quaternary)',
-                strokeWidth: 2,
-            },
+            source: ev.id,
+            target: filteredEvents[index + 1].id,
+            animated: executionStatus === 'running' && index === filteredEvents.length - 2,
+            style: { stroke: 'var(--border-strong)', strokeWidth: 2 },
         }));
 
         const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(rawNodes, rawEdges, 'TB');
         setNodes(layoutedNodes);
         setEdges(layoutedEdges);
 
-        setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 400 }), 100);
-    }, [run, reactFlowInstance, setNodes, setEdges]);
+        if (executionStatus !== 'running') {
+            setTimeout(() => reactFlowInstance.fitView({ padding: 0.3, duration: 400 }), 100);
+        }
+    }, [events, executionStatus, reactFlowInstance, setNodes, setEdges]);
 
-    // Payment tracking (server handles actual x402 payments automatically)
-    // This just updates the UI when we receive payment events
-    const trackPayment = useCallback((cost: number, walletAddress: string, toolName: string) => {
-        console.log(`[x402] Server processing payment: ${cost} TCRO for ${toolName}`);
-        setTotalCost(prev => prev + cost);
+    // Scroll chat
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [chatMessages]);
+
+    // Sidebar resize handler
+    const handleMouseMove = useCallback((e: MouseEvent) => {
+        if (!isResizing) return;
+        const newWidth = window.innerWidth - e.clientX;
+        setSidebarWidth(Math.min(Math.max(newWidth, 300), 600));
+    }, [isResizing]);
+
+    const handleMouseUp = useCallback(() => {
+        setIsResizing(false);
     }, []);
+
+    useEffect(() => {
+        if (isResizing) {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('mouseup', handleMouseUp);
+        }
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isResizing, handleMouseMove, handleMouseUp]);
 
     // Run agent
     const handleRun = async () => {
-        if (!prompt.trim()) return;
-        if (!isConnected || !address) {
-            alert("Connect your wallet to Cronos Testnet to proceed.");
-            return;
-        }
+        if (!prompt.trim() || !isConnected || !address) return;
+
+        const executionId = ++executionRef.current;
 
         if (abortControllerRef.current) {
             abortControllerRef.current.abort();
         }
         abortControllerRef.current = new AbortController();
 
-        setIsExecuting(true);
+        setExecutionStatus('running');
+        setEvents([]);
         setA2UIMessages([]);
-        setLastResult(null);
-
-        // Add user message to chat
         setChatMessages(prev => [...prev, {
             id: `user-${Date.now()}`,
             role: 'user',
             content: prompt,
-            timestamp: Date.now(),
+            timestamp: Date.now()
         }]);
-
-        const newRun: ExecutionRun = {
-            runId: `run_${Date.now()}`,
-            prompt,
-            steps: [],
-            status: 'planning',
-            totalCost: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-        };
-        setRun(newRun);
 
         let workflowCost = 0;
         let finalResultText = '';
@@ -193,9 +217,12 @@ function CanvasContent() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt, userAddress: address }),
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt, userAddress: address }),
                 signal: abortControllerRef.current.signal,
             });
 
+            if (!response.ok) throw new Error(`API error: ${response.status}`);
             if (!response.ok) throw new Error(`API error: ${response.status}`);
 
             const reader = response.body?.getReader();
@@ -213,171 +240,29 @@ function CanvasContent() {
                 buffer = lines.pop() || '';
 
                 for (const line of lines) {
-                    if (line.startsWith('data: ')) {
-                        const eventData = line.slice(6).trim();
-                        if (!eventData) continue;
+                    if (!line.startsWith('data: ')) continue;
+                    const eventData = line.slice(6).trim();
+                    if (!eventData) continue;
 
-                        try {
-                            const event = JSON.parse(eventData);
+                    try {
+                        const event: AgentEvent = JSON.parse(eventData);
+                        if (executionRef.current !== executionId) continue;
 
-                            switch (event.type) {
-                                case 'run_started':
-                                    if (event.steps) {
-                                        setRun(prev => prev ? {
-                                            ...prev,
-                                            runId: event.runId || prev.runId,
-                                            steps: event.steps,
-                                            status: 'executing',
-                                        } : prev);
-                                    }
-                                    break;
+                        setEvents(prev => {
+                            if (prev.some(e => e.id === event.id)) return prev;
+                            return [...prev, event];
+                        });
 
-                                case 'step_started':
-                                    updateStepStatus(event.stepId, 'running', { startedAt: Date.now() });
-                                    break;
-
-                                case 'step_completed':
-                                    updateStepStatus(event.stepId, 'completed', {
-                                        completedAt: Date.now(),
-                                        result: event.result,
-                                        cost: event.cost,
-                                    });
-                                    if (event.cost) workflowCost += event.cost;
-                                    break;
-
-                                case 'step_failed':
-                                    updateStepStatus(event.stepId, 'failed');
-                                    break;
-
-                                case 'a2ui':
-                                    if (event.a2ui && Array.isArray(event.a2ui)) {
-                                        setA2UIMessages(event.a2ui);
-                                        setIsSidebarOpen(true);
-                                    }
-                                    break;
-
-                                case 'payment_required':
-                                    if (event.cost && event.walletAddress) {
-                                        setPendingPayment({
-                                            cost: event.cost,
-                                            walletAddress: event.walletAddress,
-                                            toolName: event.toolName || 'tool'
-                                        });
-                                        const success = await processPayment(event.cost, event.walletAddress, event.toolName);
-                                        if (!success && event.stepId) {
-                                            updateStepStatus(event.stepId, 'failed');
-                                        }
-                                        setPendingPayment(null);
-                                    }
-                                }
-                                return [...prev, event];
-                            });
-
-                            // Handle payment events - server processes these automatically
-                            // Just track the status in the UI
-                            if (event.type === 'payment_required' && event.cost && event.walletAddress) {
-                                const toolName = event.agentName || 'unknown_tool';
-                                // Show pending status briefly (server handles auto-payment)
-                                setPendingPayment({ cost: event.cost, walletAddress: event.walletAddress, toolName });
-                            }
-
-                            // Payment success - update UI and track cost
-                            if (event.type === 'payment_success' && event.cost) {
-                                trackPayment(event.cost, event.walletAddress || '', event.agentName || '');
-                                setPendingPayment(null);
-                            }
-
-                            // Payment failed (shouldn't happen with auto-pay, but handle it)
-                            if (event.type === 'payment_failed') {
-                                setPendingPayment(null);
-                            }
-
-                                case 'run_completed':
-                                    setRun(prev => prev ? { ...prev, status: 'completed', totalCost: workflowCost } : prev);
-                                    break;
-
-                                case 'run_failed':
-                                    setRun(prev => prev ? { ...prev, status: 'failed' } : prev);
-                                    break;
-
-                                // Legacy events for backward compatibility
-                                case 'user_input':
-                                    setRun(prev => {
-                                        if (!prev) return prev;
-                                        const intentStep: ExecutionStep = {
-                                            stepId: `step_intent_${Date.now()}`,
-                                            kind: 'intent',
-                                            label: 'Understanding Request',
-                                            description: event.details,
-                                            status: 'completed',
-                                            cost: 0,
-                                        };
-                                        return { ...prev, steps: [...prev.steps, intentStep], status: 'executing' };
-                                    });
-                                    break;
-
-                                case 'tool_call':
-                                    setRun(prev => {
-                                        if (!prev) return prev;
-                                        const toolStep: ExecutionStep = {
-                                            stepId: `step_tool_${Date.now()}`,
-                                            kind: 'tool',
-                                            label: event.label || event.agentName || 'Tool Call',
-                                            toolName: event.agentName,
-                                            status: 'running',
-                                            cost: event.cost || 0.01,
-                                        };
-                                        return { ...prev, steps: [...prev.steps, toolStep] };
-                                    });
-                                    break;
-
-                                case 'final_response':
-                                    // Capture result for display
-                                    const resultText = event.details || 'Completed';
-                                    finalResultText = resultText;
-                                    setLastResult(resultText);
-
-                                    // Extract A2UI if present
-                                    if (event.metadata?.a2ui && Array.isArray(event.metadata.a2ui)) {
-                                        setA2UIMessages(event.metadata.a2ui);
-                                        setIsSidebarOpen(true);
-                                    }
-
-                                    // Mark tool steps complete, add UI step
-                                    setRun(prev => {
-                                        if (!prev) return prev;
-                                        const updatedSteps = prev.steps.map(s =>
-                                            s.status === 'running' ? { ...s, status: 'completed' as StepStatus } : s
-                                        );
-                                        const uiStep: ExecutionStep = {
-                                            stepId: `step_ui_${Date.now()}`,
-                                            kind: 'ui',
-                                            label: 'Results',
-                                            status: 'completed',
-                                            cost: 0,
-                                        };
-                                        return { ...prev, steps: [...updatedSteps, uiStep], status: 'completed' };
-                                    });
-                                    break;
-
-                                case 'error':
-                                    setRun(prev => {
-                                        if (!prev) return prev;
-                                        const errorStep: ExecutionStep = {
-                                            stepId: `step_error_${Date.now()}`,
-                                            kind: 'intent',
-                                            label: 'Error',
-                                            description: event.details,
-                                            status: 'failed',
-                                            cost: 0,
-                                        };
-                                        return { ...prev, steps: [...prev.steps, errorStep], status: 'failed' };
-                                    });
-                                    break;
-                            }
-                        } catch (e) {
-                            console.error('Failed to parse event:', e);
+                        if (event.type === 'payment_success' && event.cost) {
+                            workflowCost += event.cost;
+                            setTotalCost(prev => prev + event.cost!);
                         }
+
+                        if (event.type === 'final_response' && event.metadata?.a2ui) {
+                            setA2UIMessages(event.metadata.a2ui as A2UIMessage[]);
+                        }
+                    } catch (e) {
+                        console.error('Failed to parse event:', e);
                     }
                 }
             }
@@ -391,265 +276,280 @@ function CanvasContent() {
                     timestamp: Date.now(),
                     cost: workflowCost > 0 ? workflowCost : undefined,
                 }]);
+                setExecutionStatus('completed');
             }
         } catch (error) {
             if ((error as Error).name !== 'AbortError') {
-                console.error('Agent execution error:', error);
-                setRun(prev => prev ? { ...prev, status: 'failed' } : prev);
-                setChatMessages(prev => [...prev, {
-                    id: `system-${Date.now()}`,
-                    role: 'system',
-                    content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
-                    timestamp: Date.now(),
-                }]);
+                if ((error as Error).name !== 'AbortError') {
+                    console.error('Agent execution error:', error);
+                    setEvents(prev => [...prev, {
+                        id: `error-${Date.now()}`,
+                        timestamp: Date.now(),
+                        type: 'error',
+                        label: 'Error',
+                        details: error instanceof Error ? error.message : 'Unknown error',
+                    }]);
+                    setExecutionStatus('error');
+                }
             }
-        }
 
-        setIsExecuting(false);
-        setPendingPayment(null);
-        setTotalCost(prev => prev + workflowCost);
-        setPrompt('');
-    };
+            setPrompt('');
+        };
 
-    // Handle A2UI actions
-    const handleA2UIAction = async (payload: unknown) => {
-        console.log('A2UI Action:', payload);
-        try {
-            await fetch('/api/action', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ runId: run?.runId, action: payload }),
-            });
-        } catch (e) {
-            console.error('Failed to send action:', e);
-        }
-    };
+        // Status indicator
+        const StatusIndicator = () => {
+            const config = {
+                idle: { icon: Clock, color: 'var(--text-tertiary)', label: 'Ready' },
+                running: { icon: Loader2, color: 'var(--accent)', label: 'Running' },
+                completed: { icon: CheckCircle2, color: 'var(--success)', label: 'Done' },
+                error: { icon: XCircle, color: 'var(--error)', label: 'Error' },
+            }[executionStatus];
+            const Icon = config.icon;
 
-    return (
-        <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
-            <Navbar />
+            return (
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                    <Icon
+                        size={14}
+                        className={executionStatus === 'running' ? 'animate-spin' : ''}
+                        style={{ color: config.color }}
+                    />
+                    <span className="text-xs font-medium text-[var(--text-secondary)]">{config.label}</span>
+                </div>
+            );
+        };
 
-            <div className="flex-1 flex pt-16 overflow-hidden">
-                {/* Main Content Area */}
-                <div className="flex-1 relative flex flex-col">
+        return (
+            <div className="h-screen flex flex-col bg-[var(--bg-primary)]">
+                <Navbar />
 
-                    {/* Top Bar */}
-                    <div className="absolute top-4 left-4 right-4 z-20 flex items-center justify-between">
-                        {/* View Mode Toggle */}
-                        <div className="glass rounded-xl p-1 flex">
-                            <button
-                                onClick={() => setViewMode('canvas')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'canvas'
-                                        ? 'bg-[var(--accent)] text-white'
-                                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                                    }`}
-                            >
-                                <Grid3X3 size={14} />
-                                Canvas
-                            </button>
-                            <button
-                                onClick={() => setViewMode('chat')}
-                                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${viewMode === 'chat'
-                                        ? 'bg-[var(--accent)] text-white'
-                                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-                                    }`}
-                            >
-                                <MessageSquare size={14} />
-                                Chat
-                            </button>
-                        </div>
+                <div className="flex-1 flex overflow-hidden" style={{ paddingTop: '64px' }}>
+                    {/* Main Canvas/Chat Area */}
+                    <div className="flex-1 flex flex-col min-w-0">
 
-                        {/* Run Status + Cost */}
-                        <div className="flex items-center gap-3">
-                            {run && (
-                                <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2">
-                                    <div className={`w-2 h-2 rounded-full ${run.status === 'executing' ? 'bg-[var(--accent)] animate-pulse' :
-                                            run.status === 'completed' ? 'bg-[var(--success)]' :
-                                                run.status === 'failed' ? 'bg-[var(--error)]' :
-                                                    'bg-[var(--text-tertiary)]'
-                                        }`} />
-                                    <span className="text-xs text-[var(--text-secondary)] capitalize">
-                                        {run.status} • {run.steps.length} steps
+                        {/* Top Bar */}
+                        <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--border)] bg-[var(--bg-secondary)]">
+                            {/* View Toggle */}
+                            <div className="flex items-center gap-1 p-1 rounded-lg bg-[var(--bg-tertiary)]">
+                                <button
+                                    onClick={() => setViewMode('canvas')}
+                                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'canvas'
+                                        ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                                        }`}
+                                >
+                                    <Grid3X3 size={12} /> Canvas
+                                </button>
+                                <button
+                                    onClick={() => setViewMode('chat')}
+                                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${viewMode === 'chat'
+                                        ? 'bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-sm'
+                                        : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                                        }`}
+                                >
+                                    <MessageSquare size={12} /> Chat
+                                </button>
+                            </div>
+
+                            {/* Status + Cost */}
+                            <div className="flex items-center gap-3">
+                                <StatusIndicator />
+                                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border)]">
+                                    <Zap size={12} className="text-[var(--warning)]" />
+                                    <span className="text-xs font-mono font-medium text-[var(--text-primary)]">
+                                        {totalCost.toFixed(4)} TCRO
                                     </span>
                                 </div>
-                            )}
-                            <div className="glass rounded-xl px-3 py-1.5 flex items-center gap-2">
-                                <Zap size={12} className="text-[var(--warning)]" />
-                                <span className="text-sm font-mono text-[var(--text-primary)]">
-                                    {totalCost.toFixed(4)} TCRO
-                                </span>
                             </div>
                         </div>
-                    </div>
 
-                    {/* Processing Payment Indicator */}
-                    {pendingPayment && (
-                        <div className="absolute top-16 right-4 z-30 glass-strong rounded-xl px-4 py-3 flex items-center gap-3">
-                            <Loader2 size={20} className="animate-spin text-[var(--accent)]" />
-                            <div>
-                                <p className="text-sm font-medium text-[var(--text-primary)]">
-                                    Processing x402 Payment
-                                </p>
-                                <p className="text-xs text-[var(--text-secondary)]">
-                                    {pendingPayment.cost} TCRO for {pendingPayment.toolName}
-                                </p>
+                        {/* Canvas View */}
+                        {viewMode === 'canvas' && (
+                            <div className="flex-1 relative">
+                                <ReactFlow
+                                    nodes={nodes}
+                                    edges={edges}
+                                    onNodesChange={onNodesChange}
+                                    onEdgesChange={onEdgesChange}
+                                    nodeTypes={nodeTypes}
+                                    fitView
+                                    minZoom={0.2}
+                                    maxZoom={2}
+                                    className="bg-[var(--bg-primary)]"
+                                    proOptions={{ hideAttribution: true }}
+                                >
+                                    <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.03)" />
+                                    <Controls className="!bg-[var(--bg-tertiary)] !border-[var(--border)] !rounded-lg" />
+                                </ReactFlow>
+
+                                {/* Empty State */}
+                                {events.length === 0 && executionStatus === 'idle' && (
+                                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                        <div className="text-center">
+                                            <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center mx-auto mb-3">
+                                                <Layers size={24} className="text-[var(--text-tertiary)]" />
+                                            </div>
+                                            <p className="text-sm font-medium text-[var(--text-secondary)]">No active workflow</p>
+                                            <p className="text-xs text-[var(--text-tertiary)]">Enter a prompt below to start</p>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {/* Canvas View */}
-                    {viewMode === 'canvas' && (
-                        <ReactFlow
-                            nodes={nodes}
-                            edges={edges}
-                            onNodesChange={onNodesChange}
-                            onEdgesChange={onEdgesChange}
-                            nodeTypes={nodeTypes}
-                            fitView
-                            minZoom={0.3}
-                            maxZoom={2}
-                            className="flex-1"
-                            proOptions={{ hideAttribution: true }}
-                        >
-                            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="rgba(255,255,255,0.03)" />
-                            <Controls showInteractive={false} className="!bg-[var(--bg-tertiary)] !border-[var(--border)] !rounded-lg" />
-                        </ReactFlow>
-                    )}
-
-                    {/* Chat View */}
-                    {viewMode === 'chat' && (
-                        <div className="flex-1 flex flex-col overflow-hidden pt-16">
-                            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                        {/* Chat View */}
+                        {viewMode === 'chat' && (
+                            <div className="flex-1 overflow-y-auto p-4">
                                 {chatMessages.length === 0 ? (
                                     <div className="h-full flex flex-col items-center justify-center text-center">
-                                        <MessageSquare size={48} strokeWidth={1} className="text-[var(--text-tertiary)] mb-4" />
-                                        <p className="text-[var(--text-secondary)] font-medium">Start a conversation</p>
-                                        <p className="text-sm text-[var(--text-tertiary)]">Pay per result</p>
+                                        <MessageSquare size={40} strokeWidth={1} className="text-[var(--text-tertiary)] mb-3" />
+                                        <p className="text-sm font-medium text-[var(--text-secondary)]">Start a conversation</p>
+                                        <p className="text-xs text-[var(--text-tertiary)]">Ask anything, pay per result</p>
                                     </div>
                                 ) : (
-                                    chatMessages.map(msg => (
-                                        <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${msg.role === 'user'
+                                    <div className="max-w-2xl mx-auto space-y-3">
+                                        {chatMessages.map(msg => (
+                                            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${msg.role === 'user'
                                                     ? 'bg-[var(--accent)] text-white'
                                                     : msg.role === 'system'
-                                                        ? 'bg-[var(--error)]/20 text-[var(--error)] border border-[var(--error)]'
+                                                        ? 'bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20'
                                                         : 'bg-[var(--bg-tertiary)] text-[var(--text-primary)] border border-[var(--border)]'
-                                                }`}>
-                                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                                                {msg.cost && (
-                                                    <p className="text-xs mt-1 opacity-70 flex items-center gap-1">
-                                                        <Zap size={10} /> {msg.cost.toFixed(4)} TCRO
-                                                    </p>
-                                                )}
+                                                    }`}>
+                                                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                                                    {msg.cost && (
+                                                        <p className="text-xs mt-1 opacity-60 flex items-center gap-1">
+                                                            <Zap size={10} /> {msg.cost.toFixed(4)} TCRO
+                                                        </p>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    ))
+                                        ))}
+                                        <div ref={chatEndRef} />
+                                    </div>
                                 )}
-                                <div ref={chatEndRef} />
                             </div>
-                        </div>
-                    )}
-
-                    {/* Empty State */}
-                    {viewMode === 'canvas' && !run && !isExecuting && (
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                            <div className="text-center">
-                                <div className="w-16 h-16 rounded-2xl bg-[var(--bg-tertiary)] flex items-center justify-center mx-auto mb-4">
-                                    <Layers size={28} strokeWidth={1.5} className="text-[var(--text-tertiary)]" />
-                                </div>
-                                <p className="text-[var(--text-secondary)] font-medium mb-1">No active workflow</p>
-                                <p className="text-sm text-[var(--text-tertiary)]">Enter a prompt to start</p>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Prompt Bar */}
-                    <div className="p-4 border-t border-[var(--border)] bg-[var(--bg-secondary)]">
-                        <div className="max-w-2xl mx-auto flex gap-3">
-                            <input
-                                className="flex-1 input h-12"
-                                placeholder={isConnected ? "What would you like to do?" : "Connect wallet to start..."}
-                                value={prompt}
-                                onChange={e => setPrompt(e.target.value)}
-                                disabled={isExecuting || !isConnected}
-                                onKeyDown={e => e.key === 'Enter' && handleRun()}
-                            />
-                            <button
-                                onClick={handleRun}
-                                disabled={!isConnected || isExecuting || !prompt.trim()}
-                                className="btn-primary h-12 px-6 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-                            >
-                                {isExecuting ? <Loader2 size={18} className="animate-spin" /> : <Play size={18} fill="currentColor" />}
-                                Run
-                            </button>
-                        </div>
-                        {!isConnected && (
-                            <p className="text-center text-sm text-[var(--warning)] mt-2 flex items-center justify-center gap-2">
-                                <AlertTriangle size={14} />
-                                Connect wallet to Cronos Testnet
-                            </p>
                         )}
-                    </div>
-                </div>
 
-                {/* Sidebar (A2UI) */}
-                <aside
-                    className={`
-                        fixed inset-y-0 right-0 z-40 w-80 lg:w-96 bg-[var(--bg-secondary)] border-l border-[var(--border)]
-                        transition-transform duration-300 transform pt-16
-                        lg:relative lg:transform-none
-                        ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'}
-                    `}
-                >
-                    <div className="h-14 flex items-center justify-between px-4 border-b border-[var(--border)]">
-                        <h2 className="font-semibold text-[var(--text-primary)]">A2UI</h2>
-                        <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden p-2 rounded-lg hover:bg-[var(--bg-hover)]">
-                            <X size={18} className="text-[var(--text-secondary)]" />
-                        </button>
-                    </div>
-
-                    <div className="h-[calc(100%-3.5rem)] overflow-y-auto p-4">
-                        {a2uiMessages.length > 0 ? (
-                            <A2UIRenderer messages={a2uiMessages} onAction={handleA2UIAction} />
-                        ) : lastResult ? (
-                            // Show result text when no A2UI but we have a result
-                            <div className="p-4 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border)]">
-                                <h3 className="font-semibold text-[var(--text-primary)] mb-2">Result</h3>
-                                <p className="text-sm text-[var(--text-secondary)] whitespace-pre-wrap">{lastResult}</p>
+                        {/* Prompt Bar */}
+                        <div className="p-3 border-t border-[var(--border)] bg-[var(--bg-secondary)]">
+                            <div className="max-w-2xl mx-auto flex gap-2">
+                                <input
+                                    className="flex-1 h-10 px-4 rounded-lg text-sm bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+                                    placeholder={isConnected ? "Ask the agents..." : "Connect wallet to start"}
+                                    value={prompt}
+                                    onChange={e => setPrompt(e.target.value)}
+                                    disabled={executionStatus === 'running' || !isConnected}
+                                    onKeyDown={e => e.key === 'Enter' && handleRun()}
+                                />
+                                <Button
+                                    onClick={handleRun}
+                                    disabled={!isConnected || executionStatus === 'running' || !prompt.trim()}
+                                    className="h-10 px-4 bg-[var(--accent)] hover:bg-[var(--accent-hover)] disabled:opacity-40"
+                                >
+                                    {executionStatus === 'running' ? (
+                                        <Loader2 size={16} className="animate-spin" />
+                                    ) : (
+                                        <>
+                                            <Play size={14} fill="currentColor" className="mr-1.5" />
+                                            Run
+                                        </>
+                                    )}
+                                </Button>
                             </div>
-                        ) : (
-                            <div className="h-full flex flex-col items-center justify-center text-center">
-                                <div className="w-12 h-12 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center mb-4">
-                                    <Layers size={24} strokeWidth={1.5} className="text-[var(--text-tertiary)]" />
-                                </div>
-                                <p className="text-sm text-[var(--text-tertiary)] max-w-[200px]">
-                                    Interactive widgets will appear here
+                            {!isConnected && (
+                                <p className="text-center text-xs text-[var(--warning)] mt-2 flex items-center justify-center gap-1.5">
+                                    <AlertTriangle size={12} />
+                                    Connect wallet to Cronos Testnet
                                 </p>
-                            </div>
-                        )}
+                            )}
+                        </div>
                     </div>
-                </aside>
 
-                {/* Mobile Sidebar Toggle */}
-                {(a2uiMessages.length > 0 || lastResult) && (
-                    <button
-                        className="lg:hidden fixed bottom-24 right-4 z-50 w-12 h-12 rounded-full bg-[var(--accent)] text-white shadow-lg flex items-center justify-center"
-                        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                    {/* Resize Handle */}
+                    <div
+                        className="w-1 hover:w-1.5 bg-[var(--border)] hover:bg-[var(--accent)] cursor-col-resize transition-all hidden lg:block"
+                        onMouseDown={() => setIsResizing(true)}
+                    />
+
+                    {/* A2UI Sidebar */}
+                    <aside
+                        className="hidden lg:flex flex-col bg-[var(--bg-secondary)] border-l border-[var(--border)]"
+                        style={{ width: sidebarWidth }}
                     >
-                        <Layers size={20} />
-                    </button>
-                )}
-            </div>
-        </div>
-    );
-}
+                        {/* Header */}
+                        <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--border)]">
+                            <div className="flex items-center gap-2">
+                                <Sparkles size={14} className="text-[var(--accent)]" />
+                                <span className="text-sm font-medium text-[var(--text-primary)]">A2UI</span>
+                            </div>
+                            <span className="text-[10px] uppercase tracking-wider text-[var(--text-quaternary)]">
+                                Interactive
+                            </span>
+                        </div>
 
-export default function CanvasPage() {
-    return (
-        <ReactFlowProvider>
-            <Suspense fallback={<div className="h-screen w-screen bg-[var(--bg-primary)]" />}>
-                <CanvasContent />
-            </Suspense>
-        </ReactFlowProvider>
-    );
-}
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-4">
+                            {executionStatus === 'running' ? (
+                                /* Loading State */
+                                <div className="h-full flex flex-col items-center justify-center text-center">
+                                    <div className="w-16 h-16 rounded-2xl bg-[var(--accent)]/10 flex items-center justify-center mb-4">
+                                        <Loader2 size={28} className="animate-spin text-[var(--accent)]" />
+                                    </div>
+                                    <p className="text-sm font-medium text-[var(--text-primary)] mb-1">Building your app...</p>
+                                    <p className="text-xs text-[var(--text-tertiary)]">Agents are generating your interface</p>
+                                </div>
+                            ) : a2uiMessages.length > 0 ? (
+                                /* A2UI Content */
+                                <A2UIRenderer
+                                    messages={a2uiMessages}
+                                    onAction={async (payload) => {
+                                        console.log('A2UI Action:', payload);
+                                        try {
+                                            await fetch('/api/action', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify(payload),
+                                            });
+                                        } catch (e) {
+                                            console.error('Failed to send action:', e);
+                                        }
+                                    }}
+                                />
+                            ) : (
+                                /* Empty State */
+                                <div className="h-full flex flex-col items-center justify-center text-center">
+                                    <div className="w-14 h-14 rounded-xl bg-[var(--bg-tertiary)] flex items-center justify-center mb-3">
+                                        <Layers size={24} className="text-[var(--text-tertiary)]" />
+                                    </div>
+                                    <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">No interface yet</p>
+                                    <p className="text-xs text-[var(--text-tertiary)] max-w-[200px]">
+                                        Run a workflow and agents will build an interactive UI here
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Footer - Powered by A2UI */}
+                        <div className="h-10 flex items-center justify-center border-t border-[var(--border)] bg-[var(--bg-tertiary)]">
+                            <span className="text-[10px] uppercase tracking-wider text-[var(--text-quaternary)]">
+                                Powered by <span className="text-[var(--accent)]">A2UI</span>
+                            </span>
+                        </div>
+                    </aside>
+
+                    {/* Mobile Sidebar (overlay) */}
+                    {/* TODO: Add mobile sidebar toggle */}
+                </div>
+            </div>
+        );
+    }
+
+    export default function CanvasPage() {
+        return (
+            <ReactFlowProvider>
+                <Suspense fallback={<div className="h-screen w-screen bg-[var(--bg-primary)]" />}>
+                    <CanvasContent />
+                </Suspense>
+            </ReactFlowProvider>
+        );
+    }

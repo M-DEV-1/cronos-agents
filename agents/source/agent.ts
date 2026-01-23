@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { LlmAgent } from '@google/adk';
-import { PaidToolWrapper, paymentEvents } from './pay-wrapper.js';
+import { LlmAgent, FunctionTool } from '@google/adk';
+import { PaidToolWrapper } from './pay-wrapper.js';
 import { mcpManager } from './mcp-client.js';
 
 /**
@@ -75,32 +75,11 @@ const cryptoTool = new PaidToolWrapper({
     cost: 0.01,
     walletAddress: WALLETS.CRYPTO,
     handler: async (args: { symbol: string }) => {
-        // Use CoinGecko API for real prices
+        // Use Crypto.com MCP for real prices
         try {
-            const coinIds: Record<string, string> = {
-                'BTC': 'bitcoin',
-                'ETH': 'ethereum',
-                'CRO': 'crypto-com-chain',
-                'SOL': 'solana',
-            };
-            const coinId = coinIds[args.symbol.toUpperCase()] || args.symbol.toLowerCase();
-            const response = await fetch(
-                `https://api.coingecko.com/api/v3/simple/price?ids=${coinId}&vs_currencies=usd&include_24hr_change=true`
-            );
-            const data = await response.json();
-            const priceData = data[coinId];
-            if (priceData) {
-                return {
-                    symbol: args.symbol,
-                    price: priceData.usd,
-                    change24h: priceData.usd_24h_change,
-                    currency: 'USD'
-                };
-            }
-            // Fallback to search if CoinGecko fails
-            return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
+            return await mcpManager.callTool('cryptocom', 'get_token_price', { symbol: args.symbol.toUpperCase() });
         } catch {
-            // Fallback to search
+            // Fallback to search if MCP fails
             return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
         }
     },
@@ -136,52 +115,84 @@ const calculatorTool = new PaidToolWrapper({
     },
 });
 
+// A2UI Component Schema Definition (v0.9)
+const A2UI_COMPONENT_SCHEMA = `
+# A2UI Component Catalog (v0.9)
 
-/**
- * Source Agent
- * 
- * A multi-tool agent fully integrated with x402 payment wrappers.
- * Every tool call logs a transaction to the ledger and enforces payment logic.
- * 
- * The agent can generate A2UI (Agent-to-UI) components for rich visual responses.
- */
-import { A2UI_COMPONENT_SCHEMA } from './a2ui-generator.js';
+## Message Types
+1. **surfaceUpdate**: Add/update UI components
+2. **dataModelUpdate**: Update bound data
+3. **beginRendering**: Signal to start rendering (must be last)
+
+## Available Components (Primitives)
+- **Column**: Vertical stack. Props: children (explicitList), alignment (start|center|end|stretch), gap (number)
+- **Row**: Horizontal stack. Props: children (explicitList), alignment (start|center|end|spaceBetween), gap (number)
+- **Card**: Container. Props: title (literalString), child (id), subtitle (literalString)
+- **Divider**: Horizontal line.
+- **Text**: Display text. Props: text (literalString), usageHint (h1|h2|h3|body|caption|label), color (hex or var)
+- **Image**: Display image. Props: url (literalString), alt (literalString)
+- **Badge**: Label/Status. Props: text (literalString), variant (success|warning|error|info)
+- **Button**: Action button. Props: label (literalString), action (name, payload?), variant (primary|secondary|outline|danger)
+
+## Example: List upcoming tech conferences
+\`\`\`json
+{"surfaceUpdate": {"components": [{"id": "root", "component": {"Column": {"children": {"explicitList": ["events_header", "event_list"]}}}}]}}
+{"surfaceUpdate": {"components": [{"id": "events_header", "component": {"Text": {"text": {"literalString": "Upcoming Tech Conferences"}, "usageHint": "h2"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "event_list", "component": {"Column": {"children": {"explicitList": ["event_1", "event_2"]}}}}]}}
+{"surfaceUpdate": {"components": [{"id": "event_1", "component": {"Card": {"title": {"literalString": "Google I/O"}, "date": {"literalString": "May 14"}, "child": "desc_1"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "desc_1", "component": {"Text": {"text": {"literalString": "Mountain View, CA"}, "usageHint": "body"}}}]}}
+{"beginRendering": {"root": "root"}}
+\`\`\`
+`;
 
 export const rootAgent = new LlmAgent({
     name: 'source_agent',
     model: 'gemini-2.5-flash',
     description: 'A paid information agent that retrieves data from various sources via x402-enabled tools and generates rich A2UI interfaces.',
-    instruction: `You are a helpful Source Agent with A2UI capabilities.
-    
-    ## Paid Tools (x402)
-    You have access to several tools. Each costs TCRO (Cronos Testnet) to use:
-    - 'web_search' (0.005 TCRO): General web search
-    - 'github_search' (0.002 TCRO): Code/repo search
-    - 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices
-    - 'find_events' (0.02 TCRO): Events/conferences
-    - 'calculator' (0.001 TCRO): Math calculations
-    - 'get_weather' (0.003 TCRO): Weather information
-    
-    ## A2UI: Rich Visual Responses
-    When your response would benefit from visual presentation (lists, prices, events, cards, forms), 
-    generate A2UI JSON to create interactive UI components.
-    
-    ${A2UI_COMPONENT_SCHEMA}
-    
-    ## Guidelines
-    1. Use tools to gather information
-    2. Summarize results in natural language
-    3. When appropriate, also return A2UI JSON for rich presentation
-    4. Mark paid/premium data with isPaid: true in PriceTracker components
-    5. Include actions for interactive elements (alerts, details buttons)
-    `,
+    instruction: `You are a Source Agent with A2UI capabilities. You MUST generate A2UI JSON for EVERY response.
 
+## YOUR OUTPUT FORMAT (REQUIRED)
+You MUST end EVERY response with A2UI JSON components. This is not optional.
+
+First, write a brief text summary (1-2 sentences max).
+Then, generate A2UI JSON on separate lines.
+
+## A2UI Rules
+${A2UI_COMPONENT_SCHEMA}
+
+## Paid Tools (x402)
+- 'web_search' (0.005 TCRO): General web search
+- 'github_search' (0.002 TCRO): Code/repo search
+- 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices (via Crypto.com MCP)
+- 'find_events' (0.02 TCRO): Events/conferences
+- 'calculator' (0.001 TCRO): Math calculations
+- 'get_weather' (0.003 TCRO): Weather information
+
+## Response Examples
+
+For crypto price queries, ALWAYS output like this:
+---
+Current BTC price is $97,500 (+2.5% 24h).
+
+{"surfaceUpdate": {"components": [{"id": "root", "component": {"Column": {"children": {"explicitList": ["price_card"]}}}}]}}
+{"surfaceUpdate": {"components": [{"id": "price_card", "component": {"Card": {"title": {"literalString": "BTC Price"}, "child": "price_content"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "price_content", "component": {"Row": {"children": {"explicitList": ["symbol_col", "price_col"]}, "alignment": "spaceBetween"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "symbol_col", "component": {"Column": {"children": {"explicitList": ["symbol_text", "name_text"]}}}}]}}
+{"surfaceUpdate": {"components": [{"id": "symbol_text", "component": {"Text": {"text": {"literalString": "BTC"}, "usageHint": "h2"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "name_text", "component": {"Text": {"text": {"literalString": "Bitcoin"}, "usageHint": "caption"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "price_col", "component": {"Column": {"children": {"explicitList": ["price_text", "change_text"]}}}}]}}
+{"surfaceUpdate": {"components": [{"id": "price_text", "component": {"Text": {"text": {"literalString": "$97,500"}, "usageHint": "h2"}}}]}}
+{"surfaceUpdate": {"components": [{"id": "change_text", "component": {"Text": {"text": {"literalString": "+2.5%"}, "usageHint": "caption", "color": "var(--success)"}}}]}}
+{"beginRendering": {"root": "root"}}
+---
+
+For event listings, output A2UI cards for each event found.
+For search results, output cards with titles and descriptions.
+
+NEVER respond with only text. ALWAYS include A2UI JSON at the end.
+`,
     tools: [],
 });
-
-// Helper to convert PaidToolWrapper to ADK Tool format (FunctionTool)
-// We do this dynamically to keep the code clean.
-import { FunctionTool } from '@google/adk';
 
 const wrappers = [
     searchTool,
