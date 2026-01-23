@@ -10,7 +10,6 @@ import { createX402Handler } from '../x402/handler.js';
 import type { X402Handler } from '../x402/index.js';
 import type { Express } from 'express';
 
-// Helper to create user content (avoiding @google/genai dependency)
 function createUserContent(text: string) {
     return { role: 'user' as const, parts: [{ text }] };
 }
@@ -22,7 +21,6 @@ app.use(express.json());
 const PORT = process.env.PORT || 4000;
 const APP_NAME = 'source-agent';
 
-// Create a persistent runner instance
 const runner = new InMemoryRunner({ agent: rootAgent, appName: APP_NAME });
 
 // X402 handler for client-side payment processing (lazy initialization)
@@ -48,13 +46,29 @@ interface AgentEvent {
     details?: string;
     cost?: number;
     walletAddress?: string;
-    result?: unknown;
+    toolName?: string;
+    label?: string;
+    details?: string;
+    error?: string;
+    timestamp: number;
+    // Legacy fields
+    id?: string;
+    agentName?: string;
     metadata?: Record<string, unknown>;
 }
 
 /**
+ * Map ADK event types to step kinds
+ */
+function adkEventToStepKind(eventAuthor: string, hasToolCall: boolean): StepKind {
+    if (hasToolCall) return 'tool';
+    if (eventAuthor === 'user') return 'intent';
+    return 'intent';
+}
+
+/**
  * Main agent execution endpoint
- * Streams events via Server-Sent Events (SSE)
+ * Now derives steps from actual ADK events while using LLM-planned structure
  */
 app.post('/run', async (req: Request, res: Response) => {
     const { prompt } = req.body;
@@ -64,30 +78,52 @@ app.post('/run', async (req: Request, res: Response) => {
         return res.status(400).json({ error: 'Prompt is required' });
     }
 
-    // Set up SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
     res.flushHeaders();
 
-    const emit = (event: AgentEvent) => {
+    const emit = (event: SSEEvent) => {
         res.write(`data: ${JSON.stringify(event)}\n\n`);
     };
 
-    let eventCounter = 0;
-    const nextId = () => `evt-${Date.now()}-${eventCounter++}`;
-
     try {
-        // 1. Emit user input event
+        // 1. Create execution run
+        const run = executionStore.create(prompt, userAddress);
+
+        // 2. Plan steps using LLM (with fallback)
+        let plan;
+        try {
+            plan = await planWithLLM(prompt);
+        } catch (e) {
+            console.log('[Server] LLM planning failed, using keyword-based fallback');
+            // Import fallback from execution.ts
+            const { planStepsFromPrompt } = await import('./execution.js');
+            const fallbackSteps = planStepsFromPrompt(prompt);
+            plan = {
+                steps: fallbackSteps.map(s => ({ ...s, stepId: '', status: 'planned' as const })),
+                intents: [],
+                capabilities: []
+            };
+        }
+
+        // Add planned steps to run
+        for (const stepData of plan.steps) {
+            executionStore.addStep(run.runId, stepData);
+        }
+
+        const currentRun = executionStore.get(run.runId)!;
+        executionStore.update(run.runId, { status: 'executing' });
+
+        // 3. Emit run_started with planned steps
         emit({
-            id: nextId(),
+            type: 'run_started',
+            runId: run.runId,
+            steps: currentRun.steps,
             timestamp: Date.now(),
-            type: 'user_input',
-            label: 'User Request',
-            details: prompt.slice(0, 100) + (prompt.length > 100 ? '...' : ''),
         });
 
-        // 2. Create session for this request
+        // 4. Create ADK session
         const sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2)}`;
         await runner.sessionService.createSession({
             appName: APP_NAME,
@@ -95,12 +131,37 @@ app.post('/run', async (req: Request, res: Response) => {
             sessionId
         });
 
-        // 3. Set up payment event listener
-        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: string; txHash?: string }) => {
+        // Track execution state
+        let totalCost = 0;
+        const toolStepQueue = currentRun.steps.filter(s => s.kind === 'tool');
+        let currentToolIndex = 0;
+
+        // 5. Mark intent step as running
+        const intentStep = currentRun.steps.find(s => s.kind === 'intent');
+        if (intentStep) {
+            executionStore.updateStep(run.runId, intentStep.stepId, { status: 'running', startedAt: Date.now() });
             emit({
-                id: nextId(),
+                type: 'step_started',
+                runId: run.runId,
+                stepId: intentStep.stepId,
                 timestamp: Date.now(),
-                type: data.status === 'pending' ? 'payment_required' : data.status === 'success' ? 'payment_success' : 'payment_failed',
+            });
+        }
+
+        // 6. Payment event listener
+        const paymentHandler = (data: { name: string; cost: number; walletAddress: string; status: string; txHash?: string }) => {
+            const toolStep = toolStepQueue[currentToolIndex];
+
+            emit({
+                type: data.status === 'pending' ? 'payment_required' :
+                    data.status === 'success' ? 'payment_success' : 'step_failed',
+                runId: run.runId,
+                stepId: toolStep?.stepId,
+                toolName: data.name,
+                cost: data.cost,
+                walletAddress: data.walletAddress,
+                timestamp: Date.now(),
+                id: `evt-${Date.now()}`,
                 agentName: data.name,
                 label: data.status === 'pending' ? 'Payment Required' : data.status === 'success' ? 'Payment Confirmed' : 'Payment Failed',
                 details: `${data.cost} TCRO for ${data.name}`,
@@ -108,86 +169,214 @@ app.post('/run', async (req: Request, res: Response) => {
                 walletAddress: data.walletAddress,
                 metadata: data.txHash ? { txHash: data.txHash } : undefined
             });
+
+            if (data.status === 'success') {
+                totalCost += data.cost;
+                if (toolStep) {
+                    executionStore.updateStep(run.runId, toolStep.stepId, { cost: data.cost });
+                }
+            }
         };
         paymentEvents.on('payment', paymentHandler);
 
-        // 4. Set up tool call listener
+        // 7. Tool call listener - derive from actual ADK events
         const toolHandler = (data: { name: string; args: unknown }) => {
-            emit({
-                id: nextId(),
-                timestamp: Date.now(),
-                type: 'tool_call',
-                agentName: data.name,
-                label: data.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-                details: `Executing with args: ${JSON.stringify(data.args).slice(0, 100)}...`,
-            });
+            // Find matching tool step or create one dynamically
+            let toolStep = toolStepQueue[currentToolIndex];
+
+            if (!toolStep) {
+                // Dynamic step creation from ADK event
+                const newStep = executionStore.addStep(run.runId, {
+                    kind: 'tool',
+                    label: data.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                    toolName: data.name,
+                    cost: 0.01,
+                });
+                if (newStep) {
+                    toolStep = newStep;
+                    toolStepQueue.push(newStep);
+                }
+            }
+
+            if (toolStep) {
+                executionStore.updateStep(run.runId, toolStep.stepId, {
+                    status: 'running',
+                    startedAt: Date.now(),
+                    toolName: data.name,
+                });
+
+                emit({
+                    type: 'step_started',
+                    runId: run.runId,
+                    stepId: toolStep.stepId,
+                    timestamp: Date.now(),
+                    id: `evt-${Date.now()}`,
+                    label: toolStep.label,
+                    agentName: data.name,
+                });
+            }
         };
         paymentEvents.on('tool_call', toolHandler);
 
-        // 5. Run the agent using InMemoryRunner
+        // Tool result listener
+        const toolResultHandler = (data: { name: string; result: unknown }) => {
+            const toolStep = toolStepQueue[currentToolIndex];
+            if (toolStep && toolStep.status === 'running') {
+                executionStore.updateStep(run.runId, toolStep.stepId, {
+                    status: 'completed',
+                    completedAt: Date.now(),
+                    result: data.result,
+                });
+
+                emit({
+                    type: 'step_completed',
+                    runId: run.runId,
+                    stepId: toolStep.stepId,
+                    result: data.result,
+                    cost: toolStep.cost,
+                    timestamp: Date.now(),
+                });
+
+                currentToolIndex++;
+            }
+        };
+        paymentEvents.on('tool_result', toolResultHandler);
+
+        // 8. Run the agent and derive from ADK events
         let finalResult: unknown = null;
+        let intentCompleted = false;
 
         for await (const event of runner.runAsync({
             userId: userAddress,
             sessionId,
             newMessage: createUserContent(prompt),
         })) {
-            // Emit intermediate events as orchestrator updates
-            if (event.actions?.stateDelta) {
-                emit({
-                    id: nextId(),
-                    timestamp: Date.now(),
-                    type: 'orchestrator',
-                    label: 'Processing',
-                    details: 'Agent is reasoning...',
+            // Mark intent complete on first agent response
+            if (!intentCompleted && intentStep && event.author !== 'user') {
+                executionStore.updateStep(run.runId, intentStep.stepId, {
+                    status: 'completed',
+                    completedAt: Date.now()
                 });
+                emit({
+                    type: 'step_completed',
+                    runId: run.runId,
+                    stepId: intentStep.stepId,
+                    timestamp: Date.now(),
+                });
+                intentCompleted = true;
             }
 
-            // Check for final response
+            // Check for tool calls in ADK event using type assertion
+            // ADK events may contain tool data in various formats
+            const actions = event.actions as unknown as Record<string, unknown> | undefined;
+            if (actions) {
+                // Check if there's tool-related data
+                const actionKeys = Object.keys(actions);
+                for (const key of actionKeys) {
+                    if (key === 'stateDelta' || key === 'artifactDelta') continue;
+                    const actionData = actions[key];
+                    if (typeof actionData === 'object' && actionData !== null) {
+                        const toolData = actionData as { name?: string; args?: unknown; result?: unknown };
+                        if (toolData.name && !toolData.result) {
+                            // This is a tool call
+                            paymentEvents.emit('tool_call', {
+                                name: toolData.name,
+                                args: toolData.args,
+                            });
+                        } else if (toolData.result !== undefined) {
+                            // This is a tool result
+                            paymentEvents.emit('tool_result', {
+                                name: toolData.name || 'tool',
+                                result: toolData.result,
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Capture final response
             if (isFinalResponse(event)) {
                 const content = event.content?.parts?.map(p => p.text ?? '').join('') ?? '';
                 finalResult = content || event;
             }
         }
 
-        // 6. Extract A2UI from LLM response
-        let a2uiMessages: unknown[] = [];
-        if (finalResult) {
-            const extracted = extractA2UIFromResponse(finalResult);
-            if (extracted.length > 0) {
-                a2uiMessages = extracted;
-            } else {
-                a2uiMessages = wrapAsResultCard('Result', finalResult);
+        // 9. Mark remaining tool steps as completed
+        for (const step of toolStepQueue) {
+            if (step.status === 'running') {
+                executionStore.updateStep(run.runId, step.stepId, {
+                    status: 'completed',
+                    completedAt: Date.now(),
+                });
+                emit({
+                    type: 'step_completed',
+                    runId: run.runId,
+                    stepId: step.stepId,
+                    timestamp: Date.now(),
+                });
             }
         }
 
-        // 7. Emit final response with A2UI
-        const cleanDetails = cleanResponseText(typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
+        // 10. Extract A2UI and emit
+        let a2uiMessages: unknown[] = [];
+        if (finalResult) {
+            const extracted = extractA2UIFromResponse(finalResult);
+            a2uiMessages = extracted.length > 0 ? extracted : wrapAsResultCard('Result', finalResult);
+        }
 
-        emit({
-            id: nextId(),
-            timestamp: Date.now(),
-            type: 'final_response',
-            label: 'Final Response',
-            details: cleanDetails || 'Check the sidebar for interactive results.',
-            result: finalResult,
-            metadata: {
+        // UI step
+        const uiStep = currentRun.steps.find(s => s.kind === 'ui');
+        if (uiStep) {
+            executionStore.updateStep(run.runId, uiStep.stepId, { status: 'running', startedAt: Date.now() });
+            emit({ type: 'step_started', runId: run.runId, stepId: uiStep.stepId, timestamp: Date.now() });
+
+            emit({
+                type: 'a2ui',
+                runId: run.runId,
+                stepId: uiStep.stepId,
                 a2ui: a2uiMessages,
-            },
+                timestamp: Date.now(),
+            });
+
+            executionStore.updateStep(run.runId, uiStep.stepId, {
+                status: 'completed',
+                completedAt: Date.now(),
+                a2ui: a2uiMessages,
+            });
+            emit({ type: 'step_completed', runId: run.runId, stepId: uiStep.stepId, timestamp: Date.now() });
+        }
+
+        // 11. Legacy final_response for backward compatibility
+        const cleanDetails = cleanResponseText(typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult));
+        emit({
+            type: 'final_response',
+            runId: run.runId,
+            timestamp: Date.now(),
+            id: `evt-${Date.now()}`,
+            label: 'Final Response',
+            details: cleanDetails || 'Check sidebar for results.',
+            result: finalResult,
+            metadata: { a2ui: a2uiMessages },
         });
 
-        // Clean up listeners
+        // 12. Complete run
+        executionStore.update(run.runId, { status: 'completed', totalCost });
+        emit({ type: 'run_completed', runId: run.runId, timestamp: Date.now() });
+
+        // Cleanup
         paymentEvents.off('payment', paymentHandler);
         paymentEvents.off('tool_call', toolHandler);
+        paymentEvents.off('tool_result', toolResultHandler);
 
     } catch (error) {
         console.error('Agent execution error:', error);
         emit({
-            id: nextId(),
+            type: 'run_failed',
+            error: error instanceof Error ? error.message : 'Unknown error',
             timestamp: Date.now(),
-            type: 'error',
-            label: 'Agent Error',
-            details: error instanceof Error ? error.message : 'Unknown error occurred',
+            id: `evt-${Date.now()}`,
+            label: 'Error',
+            details: error instanceof Error ? error.message : 'Unknown error',
         });
     }
 
@@ -251,17 +440,22 @@ app.post('/tools/:toolName/execute', async (req: Request, res: Response) => {
     }
 });
 
-// Handle A2UI User Actions
-app.post('/action', (req, res) => {
-    const { action, componentId } = req.body;
-    console.log(`[Server] Received User Action: ${action?.name} from ${componentId}`);
-    // TODO: Resume Agent execution
-    res.json({ status: 'received', action });
+// A2UI actions - resume execution
+app.post('/action', async (req, res) => {
+    const { runId, action, componentId } = req.body;
+    console.log(`[A2UI] Action: ${action?.name} from ${componentId}`);
+
+    if (runId) {
+        const run = executionStore.get(runId);
+        if (run && run.status === 'waiting') {
+            executionStore.update(runId, { status: 'executing' });
+        }
+    }
+
+    res.json({ status: 'received', runId, action });
 });
 
-/**
- * Health check endpoint
- */
+// Health check
 app.get('/health', (req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: Date.now() });
 });

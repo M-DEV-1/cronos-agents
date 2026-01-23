@@ -2,17 +2,33 @@
 
 import { memo } from 'react';
 import { Handle, Position } from '@xyflow/react';
-import { Bot, Zap, CheckCircle, Database, Loader2, Search, Github, Coins, Calendar, Calculator, AlertCircle } from 'lucide-react';
+import {
+    Brain,
+    Wrench,
+    Clock,
+    Layout,
+    CheckCircle,
+    Loader2,
+    AlertCircle,
+    Zap,
+    Search,
+    Github,
+    Coins,
+    Calendar,
+    Cloud,
+    Folder,
+    Calculator
+} from 'lucide-react';
+import type { StepKind, StepStatus } from '../types/execution';
 
 interface AgentNodeData {
     label: string;
-    subtitle?: string;
-    type: string;
-    status?: 'idle' | 'running' | 'complete' | 'error';
-    cost?: number;
-    icon?: string;
+    kind: StepKind;
+    status: StepStatus;
     description?: string;
-    metadata?: Record<string, any>;
+    toolName?: string;
+    cost?: number;
+    mcpServer?: string;
 }
 
 interface AgentNodeProps {
@@ -20,123 +36,121 @@ interface AgentNodeProps {
     isConnectable: boolean;
 }
 
-const icons: Record<string, any> = {
-    orchestrator: Bot,
-    tool: Zap,
-    source: Database,
-    result: CheckCircle,
-    decision: Zap,
-    search: Search,
-    github: Github,
-    crypto: Coins,
-    events: Calendar,
-    calc: Calculator,
+// Kind-based icon mapping
+const kindIcons: Record<StepKind, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+    intent: Brain,
+    tool: Wrench,
+    wait: Clock,
+    ui: Layout,
+};
+
+// Tool-specific icon mapping
+const toolIcons: Record<string, React.ComponentType<{ size?: number; strokeWidth?: number }>> = {
+    web_search: Search,
+    github_search: Github,
+    get_crypto_price: Coins,
+    find_events: Calendar,
+    get_weather: Cloud,
+    list_directory: Folder,
+    calculator: Calculator,
+};
+
+// Kind-based accent colors
+const kindColors: Record<StepKind, string> = {
+    intent: '#3B8A8C',      // Teal (accent)
+    tool: '#8B5CF6',        // Purple
+    wait: '#F59E0B',        // Amber
+    ui: '#EC4899',          // Pink
+};
+
+// Status-based styling
+const statusStyles: Record<StepStatus, { borderColor: string; glow: boolean; icon: React.ComponentType<{ size?: number; className?: string }> | null }> = {
+    planned: { borderColor: 'var(--border)', glow: false, icon: null },
+    running: { borderColor: '#3B8A8C', glow: true, icon: Loader2 },
+    completed: { borderColor: '#22C55E', glow: false, icon: CheckCircle },
+    failed: { borderColor: '#EF4444', glow: false, icon: AlertCircle },
 };
 
 function AgentNode({ data, isConnectable }: AgentNodeProps) {
-    const iconName = data.icon || data.type;
-    const Icon = icons[iconName] || icons[data.type] || Bot;
+    const kindColor = kindColors[data.kind];
+    const statusStyle = statusStyles[data.status];
 
-    // Status visual logic
-    const isRunning = data.status === 'running';
-    const isComplete = data.status === 'complete';
-    const isError = data.status === 'error';
-
-    // Status Icon
-    let StatusIcon = null;
-    let statusColor = 'var(--text-tertiary)';
-
-    if (isRunning) {
-        StatusIcon = Loader2;
-        statusColor = 'var(--accent)';
-    } else if (isComplete) {
-        StatusIcon = CheckCircle;
-        statusColor = 'var(--success)';
-    } else if (isError) {
-        StatusIcon = AlertCircle;
-        statusColor = 'var(--error)';
-    }
+    // Get icon: prefer tool-specific, fall back to kind-based
+    const Icon = (data.toolName && toolIcons[data.toolName]) || kindIcons[data.kind];
+    const StatusIcon = statusStyle.icon;
 
     return (
-        <div className={`agent-node ${data.status || 'idle'}`}>
+        <div
+            className="agent-node"
+            data-kind={data.kind}
+            data-status={data.status}
+            style={{
+                borderColor: statusStyle.borderColor,
+                boxShadow: statusStyle.glow ? `0 0 20px ${kindColor}40` : undefined,
+            }}
+        >
             <Handle
                 type="target"
                 position={Position.Left}
                 isConnectable={isConnectable}
                 style={{
-                    background: 'var(--text-secondary)',
-                    width: 12,
-                    height: 12,
-                    left: -6,
+                    background: kindColor,
+                    width: 10,
+                    height: 10,
+                    left: -5,
                     border: '2px solid var(--bg-primary)'
                 }}
             />
 
+            {/* Left accent bar */}
+            <div
+                className="absolute left-0 top-0 bottom-0 w-1 rounded-l-lg"
+                style={{ background: kindColor }}
+            />
+
+            {/* Header */}
             <div className="agent-node-header">
-                <div style={{ color: isRunning ? 'var(--accent)' : 'var(--text-secondary)' }}>
-                    <Icon strokeWidth={1.5} size={24} />
+                <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0"
+                    style={{
+                        background: `${kindColor}15`,
+                        color: kindColor,
+                    }}
+                >
+                    <Icon size={20} strokeWidth={1.5} />
                 </div>
-                <div>
-                    <div className="agent-node-title">{data.label}</div>
-                    {data.subtitle && (
-                        <div className="agent-node-subtitle">{data.subtitle}</div>
-                    )}
+                <div className="flex-1 min-w-0">
+                    <div className="agent-node-title truncate">{data.label}</div>
+                    <div className="agent-node-subtitle">
+                        {data.kind.toUpperCase()}
+                        {data.mcpServer && ` • ${data.mcpServer}`}
+                    </div>
                 </div>
                 {StatusIcon && (
-                    <div style={{ marginLeft: 'auto', color: statusColor }}>
-                        <StatusIcon className={isRunning ? 'animate-spin' : ''} size={20} />
+                    <div style={{ color: statusStyle.borderColor }}>
+                        <StatusIcon
+                            size={18}
+                            className={data.status === 'running' ? 'animate-spin' : ''}
+                        />
                     </div>
                 )}
             </div>
 
-            {/* Content Area - Visible Description */}
-            {data.description && (
-                <div style={{ padding: '12px 16px', fontSize: '14px', color: 'var(--text-secondary)', lineHeight: '1.4', borderBottom: '1px solid var(--border)' }}>
-                    {/* Try to parse if it looks like JSON object, otherwise show text */}
-                    {(() => {
-                        try {
-                            if (data.description?.trim().startsWith('{')) {
-                                const parsed = JSON.parse(data.description);
-                                return (
-                                    <div className="text-xs font-mono bg-black/20 p-2 rounded overflow-auto max-h-[100px]">
-                                        {Object.entries(parsed).map(([k, v]) => (
-                                            <div key={k}><span className="opacity-50">{k}:</span> {String(v)}</div>
-                                        ))}
-                                    </div>
-                                );
-                            }
-                        } catch { }
-                        return data.description;
-                    })()}
-                </div>
-            )}
-
-            {/* Footer with Cost / Link */}
+            {/* Footer with cost */}
             <div className="agent-node-footer">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <Zap size={14} fill={data.cost ? 'currentColor' : 'none'} />
-                    <span style={{ fontWeight: 600 }}>
-                        {data.cost !== undefined ? `${data.cost} TCRO` : 'FREE'}
+                <div className="flex items-center gap-1.5">
+                    <Zap
+                        size={12}
+                        fill={data.cost ? 'currentColor' : 'none'}
+                        style={{ color: data.cost ? 'var(--warning)' : 'var(--text-quaternary)' }}
+                    />
+                    <span className={data.cost ? 'text-[var(--warning)]' : ''}>
+                        {data.cost ? `${data.cost} TCRO` : 'FREE'}
                     </span>
                 </div>
-                {/* Explorer Link if txHash is present in details or metadata */}
-                {data.metadata?.txHash && (
-                    <a
-                        href={`https://explorer.cronos.org/testnet/tx/${data.metadata.txHash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="hover:text-[var(--accent)] hover:underline flex items-center gap-1"
-                        style={{ fontSize: '10px', letterSpacing: '0.5px', color: 'var(--text-tertiary)', textDecoration: 'none' }}
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        VIEW TX ↗
-                    </a>
-                )}
-                {!data.metadata?.txHash && (
-                    <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-quaternary)' }}>
-                        ERC-8004
-                    </div>
-                )}
+                <div className="text-[10px] uppercase tracking-wider text-[var(--text-quaternary)]">
+                    {data.status}
+                </div>
             </div>
 
             <Handle
@@ -144,10 +158,10 @@ function AgentNode({ data, isConnectable }: AgentNodeProps) {
                 position={Position.Right}
                 isConnectable={isConnectable}
                 style={{
-                    background: 'var(--text-secondary)',
-                    width: 12,
-                    height: 12,
-                    right: -6,
+                    background: kindColor,
+                    width: 10,
+                    height: 10,
+                    right: -5,
                     border: '2px solid var(--bg-primary)'
                 }}
             />
