@@ -26,6 +26,7 @@ import { Button } from '../components/ui/button';
 import { useAccount } from 'wagmi';
 import A2UIRenderer from '../components/A2UIRenderer';
 import type { A2UIMessage } from '../types/a2ui';
+import { MOCK_A2UI_PAYLOAD } from './mock-a2ui-data';
 
 // --- TYPES ---
 type EventType = 'user_input' | 'orchestrator' | 'payment_required' | 'payment_success' | 'payment_failed' | 'tool_call' | 'tool_result' | 'final_response' | 'error';
@@ -330,6 +331,12 @@ function CanvasContent() {
                     cost: workflowCost > 0 ? workflowCost : undefined,
                 }]);
                 setExecutionStatus('completed');
+
+                // HARDCODED OVERRIDE: Inject Mock A2UI for demonstration
+                // as requested by user ("A2UI isn't working... hardcode for JSON-data inferred UI")
+                setTimeout(() => {
+                    setA2UIMessages(MOCK_A2UI_PAYLOAD as any);
+                }, 500);
             }
         } catch (error) {
             if ((error as Error).name !== 'AbortError') {
