@@ -49,20 +49,20 @@ export const MCP_SERVERS = {
 
 // Pricing tiers
 const FREE_PRICING: ToolPricing = {
-    default: { price: 0, unit: 'fixed', currency: 'USDC', description: 'Free tool' },
+    default: { price: 0, unit: 'fixed', currency: 'TCRO', description: 'Free tool' },
 };
 
 const SEARCH_PRICING: ToolPricing = {
-    default: { price: 0.001, unit: 'per_request', currency: 'USDC', description: 'Per search query' },
+    default: { price: 0.001, unit: 'per_request', currency: 'TCRO', description: 'Per search query' },
 };
 
 const DATA_PRICING: ToolPricing = {
-    snapshot: { price: 0.01, unit: 'per_request', currency: 'USDC', description: 'Single data point' },
-    stream: { price: 0.05, unit: 'per_second', currency: 'USDC', description: 'Live data stream' },
+    snapshot: { price: 0.01, unit: 'per_request', currency: 'TCRO', description: 'Single data point' },
+    stream: { price: 0.05, unit: 'per_second', currency: 'TCRO', description: 'Live data stream' },
 };
 
 const PREMIUM_PRICING: ToolPricing = {
-    default: { price: 0.05, unit: 'per_request', currency: 'USDC', description: 'Premium data access' },
+    default: { price: 0.05, unit: 'per_request', currency: 'TCRO', description: 'Premium data access' },
 };
 
 /**
@@ -87,7 +87,7 @@ export const TOOL_WALLETS: Record<string, ToolWallet> = {
     get_news: {
         toolName: 'get_news',
         walletAddress: '0x698be13c3d412192A7De76EF82229493fE34bccc', // Wallet 2
-        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'USDC' } },
+        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'TCRO' } },
         metadata: {
             source_agent_id: 'agent_news',
             category: 'news',
@@ -98,7 +98,7 @@ export const TOOL_WALLETS: Record<string, ToolWallet> = {
     search_events: {
         toolName: 'search_events',
         walletAddress: '0x70149741b02FC6b8d4d7c22DC229D857756e565b', // Wallet 3
-        pricing: { default: { price: 0.005, unit: 'per_request', currency: 'USDC' } },
+        pricing: { default: { price: 0.005, unit: 'per_request', currency: 'TCRO' } },
         metadata: {
             source_agent_id: 'agent_events',
             category: 'events',
@@ -120,7 +120,7 @@ export const TOOL_WALLETS: Record<string, ToolWallet> = {
     search_youtube: {
         toolName: 'search_youtube',
         walletAddress: '0x39636F85050Ca96C1bDb5c32b3B52a2f81F839D8', // Wallet 5
-        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'USDC' } },
+        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'TCRO' } },
         metadata: {
             source_agent_id: 'agent_youtube',
             category: 'media',
@@ -155,7 +155,7 @@ export const TOOL_WALLETS: Record<string, ToolWallet> = {
     get_github_info: {
         toolName: 'get_github_info',
         walletAddress: '0x3e9e6E727aF6B506284fFC621Ff9eAca0EbEad76', // Wallet 8
-        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'USDC' } },
+        pricing: { default: { price: 0.002, unit: 'per_request', currency: 'TCRO' } },
         metadata: {
             source_agent_id: 'agent_github',
             category: 'developer',

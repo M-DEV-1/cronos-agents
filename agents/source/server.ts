@@ -6,7 +6,7 @@ import { rootAgent } from './agent.js';
 import { paymentEvents } from './pay-wrapper.js';
 import { extractA2UIFromResponse, wrapAsResultCard, cleanResponseText } from './a2ui-generator.js';
 // Import x402 handler
-import { createX402Handler } from '../x402/index.js';
+import { createX402Handler } from '../x402/handler.js';
 import type { X402Handler } from '../x402/index.js';
 import type { Express } from 'express';
 
@@ -164,7 +164,7 @@ app.post('/run', async (req: Request, res: Response) => {
                 id: `evt-${Date.now()}`,
                 agentName: data.name,
                 label: data.status === 'pending' ? 'Payment Required' : data.status === 'success' ? 'Payment Confirmed' : 'Payment Failed',
-                details: `${data.cost} USDC for ${data.name}`,
+                details: `${data.cost} TCRO for ${data.name}`,
                 cost: data.cost,
                 walletAddress: data.walletAddress,
                 metadata: data.txHash ? { txHash: data.txHash } : undefined

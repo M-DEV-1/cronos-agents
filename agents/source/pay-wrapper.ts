@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
-import { X402Handler, createX402Handler, getToolWallet, getToolPrice, type PaymentRequirements, CRONOS_CONFIG } from '../x402/index.js';
+import { ethers } from 'ethers';
+import { X402Handler, createX402Handler, getToolWallet, getToolPrice, type PaymentRequirements, CRONOS_CONFIG, NATIVE_TOKEN_ADDRESS } from '../x402/index.js';
 import axios from 'axios';
 
 /**
@@ -18,11 +19,11 @@ function getX402Handler(): X402Handler | null {
     if (x402Handler) {
         return x402Handler;
     }
-    
+
     if (!process.env.AGENT_PRIVATE_KEY) {
         return null;
     }
-    
+
     try {
         x402Handler = createX402Handler('testnet');
         return x402Handler;
@@ -89,7 +90,7 @@ export class PaidToolWrapper {
 
     constructor(config: PaidToolConfig) {
         this.name = config.name;
-        this.description = `${config.description} (Cost: ${config.cost} USDC via x402)`;
+        this.description = `${config.description} (Cost: ${config.cost} TCRO via x402)`;
         this.cost = config.cost;
         this.walletAddress = config.walletAddress;
         this.handler = config.handler;
@@ -114,14 +115,14 @@ export class PaidToolWrapper {
             const price = getToolPrice(this.name) || this.cost;
             if (price === 0) return null;
 
-            const amount = Math.floor(price * 1e6).toString();
-            const config = CRONOS_CONFIG.testnet;
+            // Convert to wei (18 decimals for native TCRO)
+            const amount = ethers.parseEther(price.toString()).toString();
 
             return {
                 scheme: 'exact',
                 network: 'cronos-testnet',
                 payTo: this.walletAddress,
-                asset: config.usdcContract,
+                asset: NATIVE_TOKEN_ADDRESS,
                 description: `Payment for ${this.name}`,
                 mimeType: 'application/json',
                 maxAmountRequired: amount,
@@ -134,14 +135,14 @@ export class PaidToolWrapper {
             const price = getToolPrice(this.name) || this.cost;
             if (price === 0) return null;
 
-            const amount = Math.floor(price * 1e6).toString();
-            const config = handler.networkConfig;
+            // Convert to wei (18 decimals for native TCRO)
+            const amount = ethers.parseEther(price.toString()).toString();
 
             return {
                 scheme: 'exact',
                 network: 'cronos-testnet',
                 payTo: this.walletAddress,
-                asset: config.usdcContract,
+                asset: NATIVE_TOKEN_ADDRESS,
                 description: `Payment for ${this.name}`,
                 mimeType: 'application/json',
                 maxAmountRequired: amount,
@@ -174,24 +175,24 @@ export class PaidToolWrapper {
         // No payment header - try to auto-pay using x402 handler
         if (!paymentHeader) {
             const handler = this.getHandler();
-            
+
             if (handler) {
                 // Auto-pay using x402 handler
-                console.log(`[x402] Auto-paying for tool: ${this.name} (${this.cost} USDC)`);
+                console.log(`[x402] Auto-paying for tool: ${this.name} (${this.cost} TCRO)`);
                 paymentEvents.emit('payment', {
                     name: this.name,
                     cost: this.cost,
                     walletAddress: this.walletAddress,
                     status: 'pending',
                 });
-                
+
                 try {
                     // Create payment header automatically
                     console.log(`[x402] Creating payment header for ${this.name}...`);
                     console.log(`[x402] Payment requirements:`, JSON.stringify(paymentRequirements, null, 2));
                     const autoPaymentHeader = await handler.createPaymentHeader(paymentRequirements);
                     console.log(`[x402] Payment header created (length: ${autoPaymentHeader.length})`);
-                    
+
                     // Verify and settle payment
                     console.log(`[x402] Verifying payment with facilitator...`);
                     const verifyResult = await handler.verifyPayment(autoPaymentHeader, paymentRequirements);
@@ -199,11 +200,11 @@ export class PaidToolWrapper {
                         throw new Error(`Invalid payment: ${verifyResult.invalidReason}`);
                     }
                     console.log(`[x402] Payment verified successfully`);
-                    
+
                     console.log(`[x402] Settling payment with facilitator...`);
                     const settlement = await handler.settlePayment(autoPaymentHeader, paymentRequirements);
                     console.log(`[x402] Payment settled: ${settlement.txHash}`);
-                    
+
                     paymentEvents.emit('payment', {
                         name: this.name,
                         cost: this.cost,
@@ -211,20 +212,20 @@ export class PaidToolWrapper {
                         status: 'success',
                         txHash: settlement.txHash
                     });
-                    
+
                     this.recordTransaction('completed', settlement.txHash);
                     console.log(`[x402] ✅ Payment successful: ${settlement.txHash}`);
-                    
+
                     // Payment already settled - execute tool directly and return
                     paymentEvents.emit('tool_call', { name: this.name, args });
                     const result = await this.handler(args);
-                    
+
                     return {
                         ...result,
                         _x402: {
                             paid: true,
-                            amount: parseInt(paymentRequirements.maxAmountRequired) / 1e6,
-                            currency: 'USDC',
+                            amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
+                            currency: 'TCRO',
                             recipient: this.walletAddress,
                             timestamp: new Date().toISOString(),
                             txHash: settlement.txHash,
@@ -238,7 +239,7 @@ export class PaidToolWrapper {
                     console.error(`[x402] Error response:`, error.response?.data || error.response || 'No response data');
                     console.error(`[x402] Error status:`, error.response?.status || 'No status');
                     console.error(`[x402] Full error:`, error);
-                    
+
                     paymentEvents.emit('payment', {
                         name: this.name,
                         cost: this.cost,
@@ -246,7 +247,7 @@ export class PaidToolWrapper {
                         status: 'failed',
                     });
                     this.recordTransaction('failed');
-                    
+
                     // Don't throw 402 - instead, try to execute without payment (for testing)
                     // In production, you might want to throw here
                     console.warn(`[x402] ⚠️  Continuing without payment verification (testing mode)`);
@@ -303,8 +304,8 @@ export class PaidToolWrapper {
                     ...result,
                     _x402: {
                         paid: true,
-                        amount: parseInt(paymentRequirements.maxAmountRequired) / 1e6,
-                        currency: 'USDC',
+                        amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
+                        currency: 'TCRO',
                         recipient: this.walletAddress,
                         timestamp: new Date().toISOString(),
                         note: 'Payment accepted without verification (handler not configured)'
@@ -318,7 +319,7 @@ export class PaidToolWrapper {
                 throw new Error(`Invalid payment: ${verifyResult.invalidReason}`);
             }
 
-            console.log(`[x402] Settling payment for ${this.name} (${this.cost} USDC)...`);
+            console.log(`[x402] Settling payment for ${this.name} (${this.cost} TCRO)...`);
             const settlement = await handler.settlePayment(paymentHeader, paymentRequirements);
 
             console.log(`[x402] ✅ Payment settled: ${settlement.txHash}`);
@@ -341,8 +342,8 @@ export class PaidToolWrapper {
                 ...result,
                 _x402: {
                     paid: true,
-                    amount: parseInt(paymentRequirements.maxAmountRequired) / 1e6,
-                    currency: 'USDC',
+                    amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
+                    currency: 'TCRO',
                     recipient: this.walletAddress,
                     timestamp: new Date().toISOString(),
                     txHash: settlement.txHash,
@@ -394,7 +395,7 @@ export class PaidToolWrapper {
                 toolName: this.name,
                 walletAddress: this.walletAddress,
                 cost: this.cost,
-                currency: 'USDT',
+                currency: 'TCRO',
                 status,
                 txHash
             };

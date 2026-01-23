@@ -15,12 +15,11 @@ import {
     ReactFlowProvider,
 } from '@xyflow/react';
 import dagre from 'dagre';
-import { Zap, Layers, X, Play, Loader2, AlertTriangle, Grid3X3, MessageSquare } from 'lucide-react';
+import { Zap, Layers, X, Play, Calendar, Bell, TrendingUp, Grid3X3, MessageSquare, AlertTriangle, Loader2, CheckCircle } from 'lucide-react';
 import AgentNode from '../components/AgentNode';
 import { Navbar } from '../components/Navbar';
-import { useAccount, useSendTransaction, useSwitchChain, useChainId } from 'wagmi';
-import { cronosTestnet } from 'wagmi/chains';
-import { parseEther } from 'viem';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { useAccount } from 'wagmi';
 import A2UIRenderer from '../components/A2UIRenderer';
 import type { A2UIMessage } from '../types/a2ui';
 import type { ExecutionRun, ExecutionStep, StepStatus } from '../types/execution';
@@ -73,9 +72,6 @@ function CanvasContent() {
     const promptParam = searchParams.get('prompt') || '';
 
     const { isConnected, address } = useAccount();
-    const { sendTransactionAsync } = useSendTransaction();
-    const { switchChainAsync } = useSwitchChain();
-    const chainId = useChainId();
 
     const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
     const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -146,48 +142,11 @@ function CanvasContent() {
         setTimeout(() => reactFlowInstance.fitView({ padding: 0.2, duration: 400 }), 100);
     }, [run, reactFlowInstance, setNodes, setEdges]);
 
-    // Payment processing
-    const processPayment = useCallback(async (cost: number, walletAddress: string, toolName: string): Promise<boolean> => {
-        if (!address) return false;
-
-        try {
-            if (chainId !== cronosTestnet.id) {
-                await switchChainAsync({ chainId: cronosTestnet.id });
-            }
-
-            const hash = await sendTransactionAsync({
-                to: walletAddress as `0x${string}`,
-                value: parseEther(cost.toString()),
-            });
-
-            await fetch('/api/confirm', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ toolName, txHash: hash })
-            });
-
-            setTotalCost(prev => prev + cost);
-            return true;
-        } catch (error) {
-            console.error('Payment failed:', error);
-            return false;
-        }
-    }, [address, sendTransactionAsync, switchChainAsync, chainId]);
-
-    // Update step status
-    const updateStepStatus = useCallback((stepId: string, status: StepStatus, updates?: Partial<ExecutionStep>) => {
-        setRun(prev => {
-            if (!prev) return prev;
-            return {
-                ...prev,
-                steps: prev.steps.map(step =>
-                    step.stepId === stepId
-                        ? { ...step, status, ...updates }
-                        : step
-                ),
-                updatedAt: Date.now(),
-            };
-        });
+    // Payment tracking (server handles actual x402 payments automatically)
+    // This just updates the UI when we receive payment events
+    const trackPayment = useCallback((cost: number, walletAddress: string, toolName: string) => {
+        console.log(`[x402] Server processing payment: ${cost} TCRO for ${toolName}`);
+        setTotalCost(prev => prev + cost);
     }, []);
 
     // Run agent
@@ -310,7 +269,28 @@ function CanvasContent() {
                                         }
                                         setPendingPayment(null);
                                     }
-                                    break;
+                                }
+                                return [...prev, event];
+                            });
+
+                            // Handle payment events - server processes these automatically
+                            // Just track the status in the UI
+                            if (event.type === 'payment_required' && event.cost && event.walletAddress) {
+                                const toolName = event.agentName || 'unknown_tool';
+                                // Show pending status briefly (server handles auto-payment)
+                                setPendingPayment({ cost: event.cost, walletAddress: event.walletAddress, toolName });
+                            }
+
+                            // Payment success - update UI and track cost
+                            if (event.type === 'payment_success' && event.cost) {
+                                trackPayment(event.cost, event.walletAddress || '', event.agentName || '');
+                                setPendingPayment(null);
+                            }
+
+                            // Payment failed (shouldn't happen with auto-pay, but handle it)
+                            if (event.type === 'payment_failed') {
+                                setPendingPayment(null);
+                            }
 
                                 case 'run_completed':
                                     setRun(prev => prev ? { ...prev, status: 'completed', totalCost: workflowCost } : prev);
@@ -502,16 +482,17 @@ function CanvasContent() {
                         </div>
                     </div>
 
-                    {/* Payment Overlay */}
+                    {/* Processing Payment Indicator */}
                     {pendingPayment && (
-                        <div className="absolute inset-0 z-30 bg-black/60 flex items-center justify-center">
-                            <div className="glass-strong rounded-2xl p-8 text-center max-w-md">
-                                <Loader2 size={48} className="animate-spin text-[var(--accent)] mx-auto mb-4" />
-                                <h3 className="text-xl font-semibold text-[var(--text-primary)] mb-2">x402 Payment</h3>
-                                <p className="text-[var(--text-secondary)] mb-4">Confirm in wallet</p>
-                                <div className="text-2xl font-mono text-[var(--accent)]">
-                                    {pendingPayment.cost} TCRO
-                                </div>
+                        <div className="absolute top-16 right-4 z-30 glass-strong rounded-xl px-4 py-3 flex items-center gap-3">
+                            <Loader2 size={20} className="animate-spin text-[var(--accent)]" />
+                            <div>
+                                <p className="text-sm font-medium text-[var(--text-primary)]">
+                                    Processing x402 Payment
+                                </p>
+                                <p className="text-xs text-[var(--text-secondary)]">
+                                    {pendingPayment.cost} TCRO for {pendingPayment.toolName}
+                                </p>
                             </div>
                         </div>
                     )}

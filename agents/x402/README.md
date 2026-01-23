@@ -1,42 +1,41 @@
 # X402 Payment Module for Cronos
- x402 payment implementation using Cronos X402 facilitator with USDC.e token payments.
+
+x402 payment implementation using native TCRO/CRO token payments on Cronos.
 
 ## Configuration
 
 ### Network: Cronos Testnet
 - **Chain ID**: 338
 - **RPC URL**: `https://evm-t3.cronos.org`
-- **USDC.e Contract**: `0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0`
-- **Token**: Bridged USDC (Stargate) - 6 decimals
-- **Facilitator**: `https://facilitator.cronoslabs.org/v2/x402`
+- **Token**: TCRO (native) - 18 decimals
+- **Native Asset Address**: `0x0000000000000000000000000000000000000000`
 
 ### Payment Flow
 
 1. **Request** → Server returns HTTP 402 with payment requirements
-2. **Sign** → Client generates EIP-3009 signature for USDC transfer
-3. **Verify** → Server verifies signature via Cronos facilitator
-4. **Settle** → Facilitator executes `transferWithAuthorization` on-chain
-5. **Receipt** → Server returns X402 receipt with transaction hash
+2. **Transfer** → Client sends native TCRO via `eth_sendTransaction`
+3. **Verify** → Server verifies transaction on-chain
+4. **Receipt** → Server returns X402 receipt with transaction hash
 
 ### Fees
 
-- **Gas Fees**: Handled automatically by Cronos facilitator
-- **Payment Amount**: Exact USDC amount specified (no additional fees)
-- **Token Decimals**: 6 (1 USDC = 1,000,000 micro-units)
+- **Gas Fees**: Paid by sender in TCRO
+- **Payment Amount**: Exact TCRO amount specified
+- **Token Decimals**: 18 (1 TCRO = 10^18 wei)
 
 ### Example Payment
 
 ```typescript
-// Price: 0.01 USDC
-const amount = Math.floor(0.01 * 1e6).toString(); // "10000" micro-units
+// Price: 0.01 TCRO
+const amount = ethers.parseEther("0.01").toString(); // "10000000000000000" wei
 
 // Payment requirements
 {
   scheme: 'exact',
-  network: 'testnet',
+  network: 'cronos-testnet',
   payTo: '0x...',
-  asset: '0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0', // USDC.e
-  maxAmountRequired: '10000', // 0.01 USDC
+  asset: '0x0000000000000000000000000000000000000000', // Native TCRO
+  maxAmountRequired: '10000000000000000', // 0.01 TCRO in wei
   maxTimeoutSeconds: 300
 }
 ```
@@ -48,14 +47,16 @@ import { createX402Handler } from './x402/index.js';
 
 const handler = createX402Handler('testnet');
 
+// Check balance
+const balance = await handler.getBalance();
+console.log(`Wallet balance: ${balance} TCRO`);
+
 // Execute with automatic payment
 const result = await handler.executeWithPayment(url, requestBody);
 ```
 
 ## Requirements
 
-- `AGENT_PRIVATE_KEY` environment variable (wallet with USDC.e balance)
-- USDC.e tokens on Cronos testnet
-- Network access to Cronos facilitator
-
-
+- `AGENT_PRIVATE_KEY` environment variable (wallet with TCRO balance)
+- TCRO tokens on Cronos testnet (get from [Cronos Testnet Faucet](https://cronos.org/faucet))
+- Network access to Cronos testnet RPC

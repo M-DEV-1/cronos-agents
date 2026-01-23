@@ -3,17 +3,24 @@
  * Type definitions for x402 payment system on Cronos
  */
 
-// Network configuration
+
+// Native token address (address(0) represents native TCRO/CRO)
+export const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
+
 export const CRONOS_CONFIG = {
   mainnet: {
     chainId: 25,
     rpcUrl: 'https://evm.cronos.org',
-    usdcContract: '0xc21223249CA28397B4B6541dfFaEcC539BfF0c59', // USDC on Cronos mainnet
+    nativeAsset: NATIVE_TOKEN_ADDRESS,
+    currency: 'CRO',
+    decimals: 18,
   },
   testnet: {
     chainId: 338,
     rpcUrl: 'https://evm-t3.cronos.org',
-    usdcContract: '0xc01efAaF7C5C61bEbFAeb358E1161b537b8bC0e0', // USDC.e on testnet
+    nativeAsset: NATIVE_TOKEN_ADDRESS,
+    currency: 'TCRO',
+    decimals: 18,
   },
 } as const;
 
