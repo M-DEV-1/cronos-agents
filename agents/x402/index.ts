@@ -5,10 +5,13 @@
 
 // Types
 export {
-    CRONOS_CONFIG,
+    BASE_CONFIG,
+    CRONOS_CONFIG, // Legacy alias
+    USDC_ADDRESS,
     FACILITATOR_URL,
     NATIVE_TOKEN_ADDRESS,
-    type CronosNetwork,
+    type BaseNetwork,
+    type CronosNetwork, // Legacy alias
     type PaymentRequirements,
     type PricingTier,
     type ToolPricing,

@@ -42,12 +42,100 @@ export class MCPClientManager {
     }
 
     async callTool(serverName: string, toolName: string, args: Record<string, unknown>): Promise<any> {
-        const client = await this.connect(serverName);
-        console.log(`Calling tool ${toolName} on ${serverName}`);
-        return await client.callTool({
-            name: toolName,
-            arguments: args
-        });
+        try {
+            const client = await this.connect(serverName);
+            console.log(`Calling tool ${toolName} on ${serverName} with args:`, JSON.stringify(args));
+            const result = await client.callTool({
+                name: toolName,
+                arguments: args
+            });
+            
+            // Sanitize result - ensure it's never a string starting with "exception"
+            let sanitizedResult = result;
+            
+            // Check if result is a string that looks like an error
+            if (typeof result === 'string') {
+                const lowerResult = result.toLowerCase().trim();
+                if (lowerResult.startsWith('exception') || lowerResult.startsWith('error')) {
+                    console.error(`[MCP] Tool ${toolName} returned error string:`, result);
+                    return {
+                        error: true,
+                        message: 'Tool execution failed',
+                        tool: toolName,
+                        server: serverName,
+                        details: result
+                    };
+                }
+                // If it's a valid JSON string, try to parse it
+                if (result.trim().startsWith('{') || result.trim().startsWith('[')) {
+                    try {
+                        sanitizedResult = JSON.parse(result);
+                    } catch {
+                        // Not JSON, return as string
+                        sanitizedResult = result;
+                    }
+                }
+            }
+            
+            // Check if result contains error-like properties
+            if (result && typeof result === 'object') {
+                // Check for MCP error structure
+                if (result.content && Array.isArray(result.content)) {
+                    for (const item of result.content) {
+                        if (typeof item === 'string' && item.toLowerCase().includes('exception')) {
+                            console.error(`[MCP] Tool ${toolName} result contains exception:`, item);
+                            return {
+                                error: true,
+                                message: 'Tool execution failed',
+                                tool: toolName,
+                                server: serverName,
+                                details: item
+                            };
+                        }
+                    }
+                }
+                
+                // Check for text property that might contain exception
+                if (result.text && typeof result.text === 'string' && result.text.toLowerCase().includes('exception')) {
+                    console.error(`[MCP] Tool ${toolName} result.text contains exception:`, result.text);
+                    return {
+                        error: true,
+                        message: 'Tool execution failed',
+                        tool: toolName,
+                        server: serverName,
+                        details: result.text
+                    };
+                }
+            }
+            
+            console.log(`Tool ${toolName} completed successfully`);
+            return sanitizedResult;
+        } catch (error: any) {
+            console.error(`[MCP] Error calling tool ${toolName} on ${serverName}:`, error);
+            
+            // Extract error message safely
+            let errorMessage = 'Unknown error occurred';
+            if (error?.message) {
+                errorMessage = error.message;
+            } else if (typeof error === 'string') {
+                errorMessage = error;
+            } else {
+                try {
+                    errorMessage = JSON.stringify(error);
+                } catch {
+                    errorMessage = String(error);
+                }
+            }
+            
+            // Return a proper error object instead of throwing
+            return {
+                error: true,
+                message: errorMessage,
+                tool: toolName,
+                server: serverName,
+                details: error?.toString() || String(error)
+            };
+        }
     }
 
     async closeAll() {

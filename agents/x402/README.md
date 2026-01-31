@@ -1,41 +1,41 @@
-# X402 Payment Module for Cronos
+# X402 Payment Module for Base Sepolia
 
-x402 payment implementation using native TCRO/CRO token payments on Cronos.
+x402 payment implementation using USDC (ERC-20) token payments on Base Sepolia testnet.
 
 ## Configuration
 
-### Network: Cronos Testnet
-- **Chain ID**: 338
-- **RPC URL**: `https://evm-t3.cronos.org`
-- **Token**: TCRO (native) - 18 decimals
-- **Native Asset Address**: `0x0000000000000000000000000000000000000000`
+### Network: Base Sepolia Testnet
+- **Chain ID**: 84532
+- **RPC URL**: `https://sepolia.base.org`
+- **Token**: USDC (ERC-20) - 6 decimals
+- **USDC Contract Address**: `0x036CbD53842c5426634e7929541eC2318f3dCF7e`
 
 ### Payment Flow
 
 1. **Request** → Server returns HTTP 402 with payment requirements
-2. **Transfer** → Client sends native TCRO via `eth_sendTransaction`
+2. **Transfer** → Client sends USDC via ERC-20 `transfer()` function
 3. **Verify** → Server verifies transaction on-chain
 4. **Receipt** → Server returns X402 receipt with transaction hash
 
 ### Fees
 
-- **Gas Fees**: Paid by sender in TCRO
-- **Payment Amount**: Exact TCRO amount specified
-- **Token Decimals**: 18 (1 TCRO = 10^18 wei)
+- **Gas Fees**: Paid by sender in native ETH (Base Sepolia)
+- **Payment Amount**: Exact USDC amount specified
+- **Token Decimals**: 6 (1 USDC = 10^6 units)
 
 ### Example Payment
 
 ```typescript
-// Price: 0.01 TCRO
-const amount = ethers.parseEther("0.01").toString(); // "10000000000000000" wei
+// Price: 0.01 USDC
+const amount = ethers.parseUnits("0.01", 6).toString(); // "10000" units (6 decimals)
 
 // Payment requirements
 {
   scheme: 'exact',
-  network: 'cronos-testnet',
+  network: 'base-sepolia',
   payTo: '0x...',
-  asset: '0x0000000000000000000000000000000000000000', // Native TCRO
-  maxAmountRequired: '10000000000000000', // 0.01 TCRO in wei
+  asset: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // USDC contract
+  maxAmountRequired: '10000', // 0.01 USDC (6 decimals)
   maxTimeoutSeconds: 300
 }
 ```
@@ -47,9 +47,13 @@ import { createX402Handler } from './x402/index.js';
 
 const handler = createX402Handler('testnet');
 
-// Check balance
+// Check USDC balance
 const balance = await handler.getBalance();
-console.log(`Wallet balance: ${balance} TCRO`);
+console.log(`Wallet balance: ${balance} USDC`);
+
+// Check ETH balance (for gas)
+const ethBalance = await handler.getEthBalance();
+console.log(`ETH balance: ${ethBalance} ETH`);
 
 // Execute with automatic payment
 const result = await handler.executeWithPayment(url, requestBody);
@@ -57,6 +61,14 @@ const result = await handler.executeWithPayment(url, requestBody);
 
 ## Requirements
 
-- `AGENT_PRIVATE_KEY` environment variable (wallet with TCRO balance)
-- TCRO tokens on Cronos testnet (get from [Cronos Testnet Faucet](https://cronos.org/faucet))
-- Network access to Cronos testnet RPC
+- `AGENT_PRIVATE_KEY` environment variable (wallet with USDC and ETH balance)
+- USDC tokens on Base Sepolia testnet
+- Native ETH on Base Sepolia testnet for gas fees
+- Network access to Base Sepolia testnet RPC
+
+## Getting Testnet Tokens
+
+- **Base Sepolia Faucet**: https://www.coinbase.com/faucets/base-ethereum-goerli-faucet
+- **USDC on Base Sepolia**: Use the faucet or bridge from other testnets
+- **RPC Endpoint**: `https://sepolia.base.org`
+- **Chain ID**: 84532

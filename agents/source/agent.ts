@@ -5,7 +5,7 @@ import { mcpManager } from './mcp-client.js';
 
 /**
  * UNIQUE WALLET ADDRESSES FOR EACH TOOL (Source Agents)
- * These are the x402-enabled accounts on Cronos Testnet that receive payments.
+ * These are the x402-enabled accounts on Base Sepolia Testnet that receive payments.
  * Configure these in .env or use defaults for testing.
  */
 const WALLETS = {
@@ -26,7 +26,26 @@ const searchTool = new PaidToolWrapper({
     cost: 0.005,
     walletAddress: WALLETS.SEARCH,
     handler: async (args: { query: string }) => {
-        return mcpManager.callTool('brave', 'brave_web_search', args);
+        try {
+            const result = await mcpManager.callTool('brave', 'brave_web_search', args);
+            // Check if result is an error object
+            if (result && typeof result === 'object' && result.error) {
+                return {
+                    error: true,
+                    message: result.message || 'Search failed',
+                    query: args.query
+                };
+            }
+            return result;
+        } catch (error: any) {
+            console.error(`[Search] Error in web_search:`, error);
+            return {
+                error: true,
+                message: 'Search service unavailable',
+                query: args.query,
+                details: error?.message || 'Unknown error'
+            };
+        }
     },
 });
 
@@ -87,14 +106,39 @@ const cryptoTool = new PaidToolWrapper({
             };
             const coinId = idMap[symbol] || symbol.toLowerCase();
 
-            return await mcpManager.callTool('coingecko', 'get_simple_price', {
+            const result = await mcpManager.callTool('coingecko', 'get_simple_price', {
                 ids: coinId,
                 vs_currencies: 'usd',
                 include_24hr_change: true
             });
-        } catch {
+
+            // Check if result is an error object
+            if (result && typeof result === 'object' && result.error) {
+                console.warn(`[Crypto] CoinGecko failed, falling back to search:`, result.message);
+                // Fallback to search if MCP fails
+                const searchResult = await mcpManager.callTool('brave', 'brave_web_search', { 
+                    query: `${args.symbol} cryptocurrency price USD` 
+                });
+                return searchResult;
+            }
+
+            return result;
+        } catch (error: any) {
+            console.error(`[Crypto] Error in get_crypto_price:`, error);
             // Fallback to search if MCP fails
-            return mcpManager.callTool('brave', 'brave_web_search', { query: `${args.symbol} cryptocurrency price USD` });
+            try {
+                return await mcpManager.callTool('brave', 'brave_web_search', { 
+                    query: `${args.symbol} cryptocurrency price USD` 
+                });
+            } catch (searchError: any) {
+                // Last resort: return a formatted error response
+                return {
+                    error: true,
+                    message: `Failed to get price for ${args.symbol}`,
+                    details: error?.message || 'Unknown error',
+                    fallback: 'Search also failed'
+                };
+            }
         }
     },
 });
@@ -175,12 +219,12 @@ Then, generate A2UI JSON on separate lines.
 ${A2UI_COMPONENT_SCHEMA}
 
 ## Paid Tools (x402)
-- 'web_search' (0.005 TCRO): General web search
-- 'github_search' (0.002 TCRO): Code/repo search
-- 'get_crypto_price' (0.01 TCRO): Cryptocurrency prices (via CoinGecko MCP)
-- 'find_events' (0.02 TCRO): Events/conferences
-- 'calculator' (0.001 TCRO): Math calculations
-- 'get_weather' (0.003 TCRO): Weather information
+- 'web_search' (0.005 USDC): General web search
+- 'github_search' (0.002 USDC): Code/repo search
+- 'get_crypto_price' (0.01 USDC): Cryptocurrency prices (via CoinGecko MCP)
+- 'find_events' (0.02 USDC): Events/conferences
+- 'calculator' (0.001 USDC): Math calculations
+- 'get_weather' (0.003 USDC): Weather information
 
 ## Response Examples
 
@@ -218,6 +262,67 @@ const wrappers = [
     calculatorTool
 ];
 
+/**
+ * Sanitize tool result to ensure it's always valid JSON
+ * Prevents "exception" strings from being returned
+ */
+function sanitizeToolResult(result: any, toolName: string): any {
+    // If result is a string, check for exception/error patterns
+    if (typeof result === 'string') {
+        const lower = result.toLowerCase().trim();
+        if (lower.startsWith('exception') || lower.startsWith('error: exception')) {
+            console.error(`[Tool] Sanitizing exception string from ${toolName}:`, result);
+            return {
+                error: true,
+                message: 'Tool execution failed',
+                tool: toolName,
+                details: result
+            };
+        }
+        // Try to parse as JSON if it looks like JSON
+        if (result.trim().startsWith('{') || result.trim().startsWith('[')) {
+            try {
+                const parsed = JSON.parse(result);
+                return sanitizeToolResult(parsed, toolName); // Recursively sanitize
+            } catch {
+                // Not valid JSON, return as string
+                return result;
+            }
+        }
+        return result;
+    }
+    
+    // If result is an object, recursively check for exception strings
+    if (result && typeof result === 'object') {
+        // Check common error properties
+        if (result.error || result.message) {
+            // Already an error object, return as-is
+            return result;
+        }
+        
+        // Check for nested exception strings
+        const sanitized: any = Array.isArray(result) ? [] : {};
+        for (const key in result) {
+            if (result.hasOwnProperty(key)) {
+                const value = result[key];
+                if (typeof value === 'string' && value.toLowerCase().includes('exception')) {
+                    console.error(`[Tool] Found exception string in ${toolName} result.${key}:`, value);
+                    sanitized[key] = {
+                        error: true,
+                        message: 'Invalid result format',
+                        original: value
+                    };
+                } else {
+                    sanitized[key] = sanitizeToolResult(value, toolName);
+                }
+            }
+        }
+        return sanitized;
+    }
+    
+    return result;
+}
+
 // Re-assign tools property with converted FunctionTools
 // @ts-ignore - Accessing private propery or re-assigning for setup
 rootAgent.tools = wrappers.map(wrapper => {
@@ -225,9 +330,25 @@ rootAgent.tools = wrappers.map(wrapper => {
         name: wrapper.name,
         description: wrapper.description,
         execute: async (args, context?: any) => {
-            // Extract payment header from context if available
-            const paymentHeader = context?.paymentHeader || context?.headers?.['x-payment'];
-            return wrapper.execute(args, paymentHeader);
+            try {
+                // Extract payment header from context if available
+                const paymentHeader = context?.paymentHeader || context?.headers?.['x-payment'];
+                const result = await wrapper.execute(args, paymentHeader);
+                
+                // Deep sanitize result to ensure it's never an exception string
+                const sanitized = sanitizeToolResult(result, wrapper.name);
+                
+                return sanitized;
+            } catch (error: any) {
+                console.error(`[Tool] Error executing ${wrapper.name}:`, error);
+                // Return a proper error object instead of throwing
+                return {
+                    error: true,
+                    message: error?.message || 'Tool execution failed',
+                    tool: wrapper.name,
+                    details: error?.toString() || String(error)
+                };
+            }
         }
     });
 });

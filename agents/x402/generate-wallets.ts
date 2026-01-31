@@ -1,6 +1,6 @@
 /**
  * Wallet Generator Script
- * Generates real Cronos testnet wallets for all source agents
+ * Generates real Base Sepolia testnet wallets for all source agents
  * 
  * Run: npx ts-node generate-wallets.ts
  */
@@ -41,12 +41,15 @@ function generateWallets(): WalletInfo[] {
 }
 
 function generateEnvFile(wallets: WalletInfo[]): string {
-    let env = `# x402 Agent Wallets (Cronos Testnet)
+    let env = `# x402 Agent Wallets (Base Sepolia Testnet)
 # Generated: ${new Date().toISOString()}
 # 
 # IMPORTANT: Keep these private keys secure!
-# Fund each wallet with USDC.e on Cronos testnet for x402 payments
-# Faucet: https://cronos.org/faucet
+# Fund each wallet with USDC on Base Sepolia testnet for x402 payments
+# USDC Contract: 0x036CbD53842c5426634e7929541eC2318f3dCF7e
+# Faucet: https://www.coinbase.com/faucets/base-ethereum-goerli-faucet
+# RPC: https://sepolia.base.org
+# Chain ID: 84532
 
 `;
 
@@ -98,5 +101,5 @@ console.log('Written to wallet-addresses.ts');
 
 console.log('\nNext steps:');
 console.log('1. Copy .env.wallets content to your .env file');
-console.log('2. Fund wallets with USDC.e on Cronos testnet');
+console.log('2. Fund wallets with USDC on Base Sepolia testnet');
 console.log('3. Keep private keys secure!');

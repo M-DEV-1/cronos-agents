@@ -1,6 +1,6 @@
 /**
  * X402 Payment Handler
- * Handles x402 payments using native TCRO transfers on Cronos Testnet
+ * Handles x402 payments using USDC (ERC-20) transfers on Base Sepolia testnet
  */
 
 import { ethers } from 'ethers';
@@ -10,32 +10,46 @@ import {
     X402PaymentHeader,
     X402Receipt,
     PaidToolResponse,
+    BASE_CONFIG,
     CRONOS_CONFIG,
     FACILITATOR_URL,
+    BaseNetwork,
     CronosNetwork,
-    NATIVE_TOKEN_ADDRESS,
+    USDC_ADDRESS,
 } from './types.js';
 import { getToolWallet, getToolPrice } from './wallets.js';
 
+// ERC-20 ABI for USDC transfers
+const ERC20_ABI = [
+    'function transfer(address to, uint256 amount) external returns (bool)',
+    'function balanceOf(address account) external view returns (uint256)',
+    'function decimals() external view returns (uint8)',
+    'function allowance(address owner, address spender) external view returns (uint256)',
+    'function approve(address spender, uint256 amount) external returns (bool)',
+];
+
 /**
- * X402 Handler for Cronos native token (TCRO/CRO) payments
- * Uses direct wallet transfers instead of EIP-3009 for native tokens
+ * X402 Handler for Base Sepolia USDC (ERC-20) payments
+ * Uses ERC-20 token transfers for USDC payments
  */
 export class X402Handler {
     private wallet: ethers.Wallet;
-    private network: CronosNetwork;
+    private network: BaseNetwork;
     private facilitatorUrl: string;
+    private usdcContract: ethers.Contract;
 
     constructor(
         privateKey: string,
-        network: CronosNetwork = 'testnet',
+        network: BaseNetwork = 'testnet',
         facilitatorUrl: string = FACILITATOR_URL
     ) {
-        const config = CRONOS_CONFIG[network];
+        const config = BASE_CONFIG[network];
         const provider = new ethers.JsonRpcProvider(config.rpcUrl);
         this.wallet = new ethers.Wallet(privateKey, provider);
         this.network = network;
         this.facilitatorUrl = facilitatorUrl;
+        // Initialize USDC contract
+        this.usdcContract = new ethers.Contract(config.usdcAddress, ERC20_ABI, this.wallet);
     }
 
     /**
@@ -49,13 +63,22 @@ export class X402Handler {
      * Get network configuration
      */
     get networkConfig() {
-        return CRONOS_CONFIG[this.network];
+        return BASE_CONFIG[this.network];
     }
 
     /**
-     * Get the native token balance
+     * Get the USDC token balance
      */
     async getBalance(): Promise<string> {
+        const balance = await this.usdcContract.balanceOf(this.wallet.address);
+        const decimals = await this.usdcContract.decimals();
+        return ethers.formatUnits(balance, decimals);
+    }
+
+    /**
+     * Get the native ETH balance (for gas)
+     */
+    async getEthBalance(): Promise<string> {
         const balance = await this.wallet.provider!.getBalance(this.wallet.address);
         return ethers.formatEther(balance);
     }
@@ -68,22 +91,22 @@ export class X402Handler {
     }
 
     /**
-     * Create payment header for native token transfer
-     * For native tokens, this is a simpler structure than EIP-3009
+     * Create payment header for USDC (ERC-20) transfer
+     * Uses EIP-3009 compatible structure for ERC-20 tokens
      */
     async createPaymentHeader(paymentRequirements: PaymentRequirements): Promise<string> {
-        const { payTo, maxAmountRequired, maxTimeoutSeconds } = paymentRequirements;
+        const { payTo, maxAmountRequired, maxTimeoutSeconds, asset } = paymentRequirements;
 
         const nonce = this.generateNonce();
         const validBefore = Math.floor(Date.now() / 1000) + maxTimeoutSeconds;
 
-        // Convert internal network name to facilitator format
-        const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
+        // Convert internal network name to facilitator format (CAIP-2)
+        const facilitatorNetwork = this.network === 'testnet' ? 'base-sepolia' : 'base-mainnet';
 
-        // For native tokens, we sign a simple message instead of EIP-712
+        // For ERC-20 tokens, we sign a message with the token address
         const message = ethers.solidityPackedKeccak256(
-            ['address', 'address', 'uint256', 'uint256', 'bytes32'],
-            [this.wallet.address, payTo, maxAmountRequired, validBefore, nonce]
+            ['address', 'address', 'address', 'uint256', 'uint256', 'bytes32'],
+            [this.wallet.address, payTo, asset, maxAmountRequired, validBefore, nonce]
         );
         const signature = await this.wallet.signMessage(ethers.getBytes(message));
 
@@ -99,7 +122,7 @@ export class X402Handler {
                 validBefore,
                 nonce,
                 signature,
-                asset: NATIVE_TOKEN_ADDRESS, // Native token
+                asset: asset, // USDC contract address
             },
         };
 
@@ -107,7 +130,7 @@ export class X402Handler {
     }
 
     /**
-     * Create payment requirements for a tool using native TCRO
+     * Create payment requirements for a tool using USDC
      */
     createPaymentRequirements(
         toolName: string,
@@ -119,17 +142,17 @@ export class X402Handler {
         const price = getToolPrice(toolName, priceTier);
         if (price === 0) return null; // Free tool
 
-        // Convert to wei (18 decimals for native TCRO)
-        const amount = ethers.parseEther(price.toString()).toString();
+        // Convert to USDC units (6 decimals for USDC)
+        const amount = ethers.parseUnits(price.toString(), 6).toString();
 
-        // Convert internal network name to facilitator format
-        const facilitatorNetwork = this.network === 'testnet' ? 'cronos-testnet' : 'cronos-mainnet';
+        // Convert internal network name to facilitator format (CAIP-2)
+        const facilitatorNetwork = this.network === 'testnet' ? 'base-sepolia' : 'base-mainnet';
 
         return {
             scheme: 'exact',
             network: facilitatorNetwork,
             payTo: toolWallet.walletAddress,
-            asset: NATIVE_TOKEN_ADDRESS, // Native TCRO
+            asset: this.networkConfig.usdcAddress, // USDC contract address
             description: `Payment for ${toolName}`,
             mimeType: 'application/json',
             maxAmountRequired: amount,
@@ -138,19 +161,19 @@ export class X402Handler {
     }
 
     /**
-     * Execute native token transfer directly (bypasses facilitator)
-     * This is the core payment method for TCRO
+     * Execute USDC (ERC-20) token transfer
+     * This is the core payment method for USDC on Base Sepolia
      */
-    async sendNativePayment(
+    async sendUSDCPayment(
         to: string,
-        amountWei: string
+        amountUnits: string
     ): Promise<{ txHash: string; from: string; to: string; value: string; blockNumber?: number }> {
-        console.log(`[x402] Sending ${ethers.formatEther(amountWei)} TCRO to ${to}...`);
+        const decimals = await this.usdcContract.decimals();
+        const amountFormatted = ethers.formatUnits(amountUnits, decimals);
+        console.log(`[x402] Sending ${amountFormatted} USDC to ${to}...`);
 
-        const tx = await this.wallet.sendTransaction({
-            to,
-            value: amountWei,
-        });
+        // Execute ERC-20 transfer
+        const tx = await this.usdcContract.transfer(to, amountUnits);
 
         console.log(`[x402] Transaction sent: ${tx.hash}`);
         const receipt = await tx.wait();
@@ -160,14 +183,14 @@ export class X402Handler {
             txHash: tx.hash,
             from: this.wallet.address,
             to,
-            value: amountWei,
+            value: amountUnits,
             blockNumber: receipt?.blockNumber,
         };
     }
 
     /**
      * Verify payment header (for receiving payments)
-     * For native tokens, we may skip facilitator verification
+     * For ERC-20 tokens, verifies signature and payment authorization
      */
     async verifyPayment(
         paymentHeader: string,
@@ -182,14 +205,18 @@ export class X402Handler {
                 return { isValid: false, invalidReason: 'Recipient mismatch' };
             }
 
+            if (decoded.payload.asset.toLowerCase() !== paymentRequirements.asset.toLowerCase()) {
+                return { isValid: false, invalidReason: 'Asset mismatch' };
+            }
+
             if (BigInt(decoded.payload.value) < BigInt(paymentRequirements.maxAmountRequired)) {
                 return { isValid: false, invalidReason: 'Insufficient payment amount' };
             }
 
-            // For native tokens, verify the signature
+            // For ERC-20 tokens, verify the signature with token address
             const message = ethers.solidityPackedKeccak256(
-                ['address', 'address', 'uint256', 'uint256', 'bytes32'],
-                [decoded.payload.from, decoded.payload.to, decoded.payload.value, decoded.payload.validBefore, decoded.payload.nonce]
+                ['address', 'address', 'address', 'uint256', 'uint256', 'bytes32'],
+                [decoded.payload.from, decoded.payload.to, decoded.payload.asset, decoded.payload.value, decoded.payload.validBefore, decoded.payload.nonce]
             );
 
             const recoveredAddress = ethers.verifyMessage(ethers.getBytes(message), decoded.payload.signature);
@@ -211,7 +238,7 @@ export class X402Handler {
     }
 
     /**
-     * Settle payment - for native tokens, this executes the actual transfer
+     * Settle payment - for USDC, this executes the actual ERC-20 transfer
      */
     async settlePayment(
         paymentHeader: string,
@@ -227,8 +254,8 @@ export class X402Handler {
         timestamp?: string;
     }> {
         try {
-            // For native TCRO, execute direct transfer
-            const result = await this.sendNativePayment(
+            // For USDC, execute ERC-20 transfer
+            const result = await this.sendUSDCPayment(
                 paymentRequirements.payTo,
                 paymentRequirements.maxAmountRequired
             );
@@ -322,8 +349,8 @@ export class X402Handler {
                         },
                     });
 
-                    // Cost in TCRO (18 decimals)
-                    const cost = parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired));
+                    // Cost in USDC (6 decimals)
+                    const cost = parseFloat(ethers.formatUnits(paymentRequirements.maxAmountRequired, 6));
 
                     return {
                         status: 'success',
@@ -354,7 +381,7 @@ export class X402Handler {
 /**
  * Factory function to create handler from environment
  */
-export function createX402Handler(network: CronosNetwork = 'testnet'): X402Handler {
+export function createX402Handler(network: BaseNetwork = 'testnet'): X402Handler {
     const privateKey = process.env.AGENT_PRIVATE_KEY;
     if (!privateKey) {
         throw new Error('AGENT_PRIVATE_KEY environment variable is required');

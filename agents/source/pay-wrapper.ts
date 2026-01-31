@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 import { ethers } from 'ethers';
-import { X402Handler, createX402Handler, getToolWallet, getToolPrice, type PaymentRequirements, CRONOS_CONFIG, NATIVE_TOKEN_ADDRESS } from '../x402/index.js';
+import { X402Handler, createX402Handler, getToolWallet, getToolPrice, type PaymentRequirements, BASE_CONFIG, USDC_ADDRESS } from '../x402/index.js';
 import axios from 'axios';
 
 /**
@@ -90,7 +90,7 @@ export class PaidToolWrapper {
 
     constructor(config: PaidToolConfig) {
         this.name = config.name;
-        this.description = `${config.description} (Cost: ${config.cost} TCRO via x402)`;
+        this.description = `${config.description} (Cost: ${config.cost} USDC via x402)`;
         this.cost = config.cost;
         this.walletAddress = config.walletAddress;
         this.handler = config.handler;
@@ -115,14 +115,14 @@ export class PaidToolWrapper {
             const price = getToolPrice(this.name) || this.cost;
             if (price === 0) return null;
 
-            // Convert to wei (18 decimals for native TCRO)
-            const amount = ethers.parseEther(price.toString()).toString();
+            // Convert to USDC units (6 decimals)
+            const amount = ethers.parseUnits(price.toString(), 6).toString();
 
             return {
                 scheme: 'exact',
-                network: 'cronos-testnet',
+                network: 'base-sepolia',
                 payTo: this.walletAddress,
-                asset: NATIVE_TOKEN_ADDRESS,
+                asset: USDC_ADDRESS,
                 description: `Payment for ${this.name}`,
                 mimeType: 'application/json',
                 maxAmountRequired: amount,
@@ -135,14 +135,14 @@ export class PaidToolWrapper {
             const price = getToolPrice(this.name) || this.cost;
             if (price === 0) return null;
 
-            // Convert to wei (18 decimals for native TCRO)
-            const amount = ethers.parseEther(price.toString()).toString();
+            // Convert to USDC units (6 decimals)
+            const amount = ethers.parseUnits(price.toString(), 6).toString();
 
             return {
                 scheme: 'exact',
-                network: 'cronos-testnet',
+                network: 'base-sepolia',
                 payTo: this.walletAddress,
-                asset: NATIVE_TOKEN_ADDRESS,
+                asset: USDC_ADDRESS,
                 description: `Payment for ${this.name}`,
                 mimeType: 'application/json',
                 maxAmountRequired: amount,
@@ -178,7 +178,7 @@ export class PaidToolWrapper {
 
             if (handler) {
                 // Auto-pay using x402 handler
-                console.log(`[x402] Auto-paying for tool: ${this.name} (${this.cost} TCRO)`);
+                console.log(`[x402] Auto-paying for tool: ${this.name} (${this.cost} USDC)`);
                 paymentEvents.emit('payment', {
                     name: this.name,
                     cost: this.cost,
@@ -218,17 +218,27 @@ export class PaidToolWrapper {
 
                     // Payment already settled - execute tool directly and return
                     paymentEvents.emit('tool_call', { name: this.name, args });
-                    const result = await this.handler(args);
-
-                    // Emit tool result for A2UI generation
-                    paymentEvents.emit('tool_result', { name: this.name, result });
+                    let result;
+                    try {
+                        result = await this.handler(args);
+                        // Emit tool result for A2UI generation
+                        paymentEvents.emit('tool_result', { name: this.name, result });
+                    } catch (handlerError: any) {
+                        console.error(`[x402] Handler execution failed for ${this.name}:`, handlerError);
+                        result = {
+                            error: true,
+                            message: handlerError?.message || 'Tool execution failed',
+                            tool: this.name,
+                            details: handlerError?.toString() || String(handlerError)
+                        };
+                    }
 
                     return {
                         ...result,
                         _x402: {
                             paid: true,
-                            amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
-                            currency: 'TCRO',
+                            amount: parseFloat(ethers.formatUnits(paymentRequirements.maxAmountRequired, 6)),
+                            currency: 'USDC',
                             recipient: this.walletAddress,
                             timestamp: new Date().toISOString(),
                             txHash: settlement.txHash,
@@ -255,7 +265,18 @@ export class PaidToolWrapper {
                     // In production, you might want to throw here
                     console.warn(`[x402] ⚠️  Continuing without payment verification (testing mode)`);
                     paymentEvents.emit('tool_call', { name: this.name, args });
-                    const result = await this.handler(args);
+                    let result;
+                    try {
+                        result = await this.handler(args);
+                    } catch (handlerError: any) {
+                        console.error(`[x402] Handler execution failed for ${this.name}:`, handlerError);
+                        result = {
+                            error: true,
+                            message: handlerError?.message || 'Tool execution failed',
+                            tool: this.name,
+                            details: handlerError?.toString() || String(handlerError)
+                        };
+                    }
                     return {
                         ...result,
                         _x402: {
@@ -302,18 +323,35 @@ export class PaidToolWrapper {
                 });
                 this.recordTransaction('completed');
                 paymentEvents.emit('tool_call', { name: this.name, args });
-                const result = await this.handler(args);
-                return {
-                    ...result,
-                    _x402: {
-                        paid: true,
-                        amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
-                        currency: 'TCRO',
-                        recipient: this.walletAddress,
-                        timestamp: new Date().toISOString(),
-                        note: 'Payment accepted without verification (handler not configured)'
-                    }
-                };
+                try {
+                    const result = await this.handler(args);
+                    return {
+                        ...result,
+                        _x402: {
+                            paid: true,
+                            amount: parseFloat(ethers.formatUnits(paymentRequirements.maxAmountRequired, 6)),
+                            currency: 'USDC',
+                            recipient: this.walletAddress,
+                            timestamp: new Date().toISOString(),
+                            note: 'Payment accepted without verification (handler not configured)'
+                        }
+                    };
+                } catch (handlerError: any) {
+                    console.error(`[x402] Handler execution failed for ${this.name}:`, handlerError);
+                    return {
+                        error: true,
+                        message: handlerError?.message || 'Tool execution failed',
+                        tool: this.name,
+                        _x402: {
+                            paid: true,
+                            amount: parseFloat(ethers.formatUnits(paymentRequirements.maxAmountRequired, 6)),
+                            currency: 'USDC',
+                            recipient: this.walletAddress,
+                            timestamp: new Date().toISOString(),
+                            note: 'Payment accepted but tool execution failed'
+                        }
+                    };
+                }
             }
 
             console.log(`[x402] Verifying payment for ${this.name}...`);
@@ -322,7 +360,7 @@ export class PaidToolWrapper {
                 throw new Error(`Invalid payment: ${verifyResult.invalidReason}`);
             }
 
-            console.log(`[x402] Settling payment for ${this.name} (${this.cost} TCRO)...`);
+            console.log(`[x402] Settling payment for ${this.name} (${this.cost} USDC)...`);
             const settlement = await handler.settlePayment(paymentHeader, paymentRequirements);
 
             console.log(`[x402] ✅ Payment settled: ${settlement.txHash}`);
@@ -337,19 +375,29 @@ export class PaidToolWrapper {
             this.recordTransaction('completed', settlement.txHash);
             paymentEvents.emit('tool_call', { name: this.name, args });
 
-            // Execute tool
-            const result = await this.handler(args);
-
-            // Emit tool result for A2UI generation
-            paymentEvents.emit('tool_result', { name: this.name, result });
+            // Execute tool with error handling
+            let result;
+            try {
+                result = await this.handler(args);
+                // Emit tool result for A2UI generation
+                paymentEvents.emit('tool_result', { name: this.name, result });
+            } catch (handlerError: any) {
+                console.error(`[x402] Handler execution failed for ${this.name}:`, handlerError);
+                result = {
+                    error: true,
+                    message: handlerError?.message || 'Tool execution failed',
+                    tool: this.name,
+                    details: handlerError?.toString() || String(handlerError)
+                };
+            }
 
             // Return with X402 receipt
             return {
                 ...result,
                 _x402: {
                     paid: true,
-                    amount: parseFloat(ethers.formatEther(paymentRequirements.maxAmountRequired)),
-                    currency: 'TCRO',
+                    amount: parseFloat(ethers.formatUnits(paymentRequirements.maxAmountRequired, 6)),
+                    currency: 'USDC',
                     recipient: this.walletAddress,
                     timestamp: new Date().toISOString(),
                     txHash: settlement.txHash,
@@ -401,7 +449,7 @@ export class PaidToolWrapper {
                 toolName: this.name,
                 walletAddress: this.walletAddress,
                 cost: this.cost,
-                currency: 'TCRO',
+                currency: 'USDC',
                 status,
                 txHash
             };

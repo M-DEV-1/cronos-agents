@@ -97,7 +97,7 @@ app.post('/run', async (req: Request, res: Response) => {
                 type: data.status === 'pending' ? 'payment_required' : data.status === 'success' ? 'payment_success' : 'payment_failed',
                 agentName: data.name,
                 label: data.status === 'pending' ? 'Payment Required' : data.status === 'success' ? 'Payment Confirmed' : 'Payment Failed',
-                details: `${data.cost} TCRO for ${data.name}`,
+                details: `${data.cost} USDC for ${data.name}`,
                 cost: data.cost,
                 walletAddress: data.walletAddress,
                 metadata: data.txHash ? { txHash: data.txHash } : undefined
@@ -126,6 +126,46 @@ app.post('/run', async (req: Request, res: Response) => {
             sessionId,
             newMessage: createUserContent(prompt),
         })) {
+            // Check for errors first
+            if ((event as any).errorCode || (event as any).errorMessage) {
+                const errorCode = (event as any).errorCode;
+                const errorMessage = (event as any).errorMessage || 'Unknown error occurred';
+                
+                console.error('[AGENT] Error detected:', {
+                    errorCode,
+                    errorMessage,
+                });
+
+                emit({
+                    id: nextId(),
+                    timestamp: Date.now(),
+                    type: 'error',
+                    label: `API Error (${errorCode})`,
+                    details: errorMessage,
+                });
+
+                // Set final result to error message
+                finalResult = `Error: ${errorMessage}${errorCode ? ` (Code: ${errorCode})` : ''}`;
+                // Break out of loop since we have an error
+                break;
+            }
+
+            // Debug: log all events with full structure
+            console.log('[AGENT] Event received:', {
+                type: event.type || 'unknown',
+                hasContent: !!event.content,
+                hasActions: !!event.actions,
+                isFinal: isFinalResponse(event),
+                contentKeys: event.content ? Object.keys(event.content) : [],
+                contentParts: event.content?.parts ? event.content.parts.length : 0,
+                eventKeys: Object.keys(event),
+            });
+
+            // Log full event structure for final responses
+            if (isFinalResponse(event)) {
+                console.log('[AGENT] Full final event structure:', JSON.stringify(event, null, 2));
+            }
+
             if (event.actions?.stateDelta) {
                 emit({
                     id: nextId(),
@@ -136,19 +176,115 @@ app.post('/run', async (req: Request, res: Response) => {
                 });
             }
 
+            // Handle tool calls - emit events for debugging
+            if (event.actions?.toolCalls) {
+                console.log('[AGENT] Tool calls detected:', event.actions.toolCalls.length);
+                for (const toolCall of event.actions.toolCalls || []) {
+                    emit({
+                        id: nextId(),
+                        timestamp: Date.now(),
+                        type: 'tool_call',
+                        label: `Calling ${toolCall.name}`,
+                        details: `Tool: ${toolCall.name}`,
+                        agentName: toolCall.name,
+                    });
+                }
+            }
+
+            // Handle tool results
+            if (event.actions?.toolResults) {
+                console.log('[AGENT] Tool results detected:', event.actions.toolResults.length);
+                for (const toolResult of event.actions.toolResults || []) {
+                    emit({
+                        id: nextId(),
+                        timestamp: Date.now(),
+                        type: 'tool_result',
+                        label: `Tool result`,
+                        details: `Result from tool execution`,
+                        agentName: toolResult.name,
+                    });
+                }
+            }
+
+            // Check for content in multiple possible locations
             if (isFinalResponse(event)) {
-                const content = event.content?.parts?.map(p => p.text ?? '').join('') ?? '';
+                // Try multiple ways to extract content
+                let content = '';
+                
+                // Method 1: Standard content.parts
+                if (event.content?.parts) {
+                    content = event.content.parts.map((p: any) => {
+                        if (typeof p === 'string') return p;
+                        if (p?.text) return p.text;
+                        if (p?.inlineData) return '[Binary data]';
+                        return '';
+                    }).join('');
+                }
+                
+                // Method 2: Direct text property
+                if (!content && (event as any).text) {
+                    content = (event as any).text;
+                }
+                
+                // Method 3: Content as string
+                if (!content && typeof event.content === 'string') {
+                    content = event.content;
+                }
+                
+                // Method 4: Check for response in different structure
+                if (!content && (event as any).response) {
+                    const response = (event as any).response;
+                    if (typeof response === 'string') {
+                        content = response;
+                    } else if (response?.content?.parts) {
+                        content = response.content.parts.map((p: any) => p?.text || '').join('');
+                    }
+                }
+
+                // Method 5: Check if event itself has message/content
+                if (!content && (event as any).message) {
+                    const message = (event as any).message;
+                    if (typeof message === 'string') {
+                        content = message;
+                    } else if (message?.content?.parts) {
+                        content = message.content.parts.map((p: any) => p?.text || '').join('');
+                    }
+                }
+
                 finalResult = content || event;
+                console.log('[AGENT] Final response detected:', {
+                    contentLength: content.length,
+                    hasContent: !!content,
+                    extractedContent: content.slice(0, 200),
+                });
             }
         }
 
         // 6. Emit final response (Raw text/JSON) - Client handles A2UI extraction
+        // If no result was captured, check if we have an error
+        if (!finalResult || (typeof finalResult === 'object' && Object.keys(finalResult).length === 0)) {
+            console.warn('[AGENT] No final result captured, checking for errors...');
+            // This shouldn't happen if error handling above worked, but just in case
+            finalResult = 'No response generated. Please check the agent logs for errors.';
+        }
+
+        console.log('[AGENT] Emitting final response:', {
+            hasResult: !!finalResult,
+            resultType: typeof finalResult,
+            resultLength: typeof finalResult === 'string' ? finalResult.length : 'N/A',
+            resultPreview: typeof finalResult === 'string' ? finalResult.slice(0, 100) : 'N/A',
+        });
+        
+        const responseText = typeof finalResult === 'string' 
+            ? finalResult 
+            : JSON.stringify(finalResult);
+            
         emit({
             id: nextId(),
             timestamp: Date.now(),
             type: 'final_response',
             label: 'Final Response',
-            details: typeof finalResult === 'string' ? finalResult : JSON.stringify(finalResult),
+            details: responseText,
             result: finalResult,
         });
 

@@ -681,5 +681,14 @@
     "currency": "TCRO",
     "status": "completed",
     "txHash": "0xc6c5cae8d45b912095cc01d7363782d0df999b9062469289052e76c8e2bee13f"
+  },
+  {
+    "timestamp": "2026-01-31T19:33:14.255Z",
+    "toolName": "get_crypto_price",
+    "walletAddress": "0x87C45698081B7F3ae524435da0d80735513eA5DA",
+    "cost": 0.01,
+    "currency": "USDC",
+    "status": "completed",
+    "txHash": "0x58220917aa86dafb76aebdec47505a10f6f44cd8b37ab0959b61214eac983cd4"
   }
 ]

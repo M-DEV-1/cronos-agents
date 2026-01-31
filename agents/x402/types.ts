@@ -1,40 +1,46 @@
 /**
  * x402 Payment Types
- * Type definitions for x402 payment system on Cronos
+ * Type definitions for x402 payment system on Base Sepolia testnet
  */
 
+// USDC contract address on Base Sepolia testnet
+export const USDC_ADDRESS = '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
 
-// Native token address (address(0) represents native TCRO/CRO)
+// Native token address (address(0) represents native ETH)
 export const NATIVE_TOKEN_ADDRESS = '0x0000000000000000000000000000000000000000';
 
-export const CRONOS_CONFIG = {
+export const BASE_CONFIG = {
   mainnet: {
-    chainId: 25,
-    rpcUrl: 'https://evm.cronos.org',
-    nativeAsset: NATIVE_TOKEN_ADDRESS,
-    currency: 'CRO',
-    decimals: 18,
+    chainId: 8453,
+    rpcUrl: 'https://mainnet.base.org',
+    usdcAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // USDC on Base mainnet
+    currency: 'USDC',
+    decimals: 6, // USDC has 6 decimals
   },
   testnet: {
-    chainId: 338,
-    rpcUrl: 'https://evm-t3.cronos.org',
-    nativeAsset: NATIVE_TOKEN_ADDRESS,
-    currency: 'TCRO',
-    decimals: 18,
+    chainId: 84532,
+    rpcUrl: 'https://sepolia.base.org',
+    usdcAddress: USDC_ADDRESS, // USDC on Base Sepolia testnet
+    currency: 'USDC',
+    decimals: 6, // USDC has 6 decimals
   },
 } as const;
 
-export type CronosNetwork = keyof typeof CRONOS_CONFIG;
+export type BaseNetwork = keyof typeof BASE_CONFIG;
 
-// Facilitator URL
-export const FACILITATOR_URL = 'https://facilitator.cronoslabs.org/v2/x402';
+// Legacy alias for backward compatibility
+export const CRONOS_CONFIG = BASE_CONFIG;
+export type CronosNetwork = BaseNetwork;
+
+// Facilitator URL (Coinbase x402 facilitator for Base)
+export const FACILITATOR_URL = 'https://facilitator.cdp.coinbase.com/v2/x402';
 
 // Payment Requirements (returned in 402 response)
 export interface PaymentRequirements {
   scheme: 'exact' | 'range';
-  network: 'cronos-testnet' | 'cronos-mainnet'; // Facilitator expects full network name
+  network: 'base-sepolia' | 'base-mainnet'; // CAIP-2 format: eip155:84532 or eip155:8453
   payTo: string;
-  asset: string;
+  asset: string; // USDC contract address
   description: string;
   mimeType: string;
   maxAmountRequired: string;
@@ -65,7 +71,7 @@ export interface ToolWallet {
 export interface X402PaymentHeader {
   x402Version: number;
   scheme: string;
-  network: 'cronos-testnet' | 'cronos-mainnet'; // Facilitator expects full network name
+  network: 'base-sepolia' | 'base-mainnet'; // CAIP-2 format: eip155:84532 or eip155:8453
   payload: {
     from: string;
     to: string;
@@ -74,7 +80,7 @@ export interface X402PaymentHeader {
     validBefore: number;
     nonce: string;
     signature: string;
-    asset: string;
+    asset: string; // USDC contract address
   };
 }
 
